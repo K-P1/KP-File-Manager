@@ -97,7 +97,7 @@ You can run it in:
 
 1. **Clone or Download** this project into a local directory:
    ```bash
-   git clone https://github.com/KP-1/file_manager.git
+   git clone https://github.com/K-P1/KP-File-Manager.git
    cd file_manager
    ```
 2. (Optional) **Create & activate** a virtual environment:
@@ -287,4 +287,3 @@ This script supports arguments like `--sort`, `--mass-rename`, `--music-rename`,
 ### Contact
 
 For questions, suggestions, or to report a bug, feel free to open an **issue** or submit a **pull request**.
-```
