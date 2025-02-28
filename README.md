@@ -4,10 +4,16 @@ A Python-based File Manager that offers:
 1. **Sort Files** into categorized folders (based on file type).
 2. **Mass Rename** of files (supports **sequential** or **random** numbering).
 3. **Music Rename** using ID3 tags (e.g., `01. Artist - Title (feat. X)`).
+4. **Keyword Rename** that replaces a specified keyword in filenames with a user-provided string.
+   - Also, if no file extension or '*' is provided in Mass Rename, the script renames **all files** in the source folder, preserving each file’s original extension.
 
 You can run it in:
-- A **GUI** (using Tkinter with radio buttons to select one operation).
-- A **CLI** (via `main.py`, if desired, though this README focuses on the GUI usage).
+- A **GUI** – choose between two interfaces:
+  - **Tkinter GUI** (file: `gui_old.py`)
+  - **PyQt GUI** (file: `gui_new.py`)
+- A **CLI** (via `main.py`, if desired; this README focuses on the GUI usage).
+
+---
 
 ## Features
 
@@ -19,31 +25,55 @@ You can run it in:
 
 2. **Mass Rename**  
    - Renames all files of a specific **extension** in the **source** folder.  
+   - If the file extension is left blank or specified as `*`, the script renames **all files** in the folder and preserves their original extensions.
    - Allows specifying:
-     - **Prefix** (e.g., `Renamed_`).  
-     - **Start Index** (e.g., `1`, `10`, etc.).  
-     - **Zero Padding** (e.g., `2` → `01, 02`; `3` → `001, 002`).  
-   - **Scramble** mode generates **unique random** numbers instead of sequential counters.  
-     - **Scramble Multiplier** (1..10) → If there are `N` files, the random numbers are taken from `1..(N * multiplier)` without duplicates.  
+     - **Prefix** (e.g., `Renamed_`).
+     - **Start Index** (e.g., `1`, `10`, etc.).
+     - **Zero Padding** (e.g., `2` → `01, 02`; `3` → `001, 002`).
+   - **Scramble** mode generates **unique random** numbers instead of sequential counters.
+     - **Scramble Multiplier** (1..10) determines the max range of random numbers.  
+       For example, if you have 10 files and choose multiplier 2, random numbers are taken from 1..20 without duplicates.
    - **Undo** reverts to original filenames.
 
 3. **Music Rename**  
-   - Specifically targets **audio files** (commonly `.mp3`), reading **ID3 tags** (artist, title, tracknumber).  
-   - Renames them to a format such as:  
+   - Specifically targets **audio files** (commonly `.mp3`), reading **ID3 tags** (artist, title, tracknumber).
+   - Renames them to a format such as:
      ```
      01. MainArtist - SongTitle (feat. OtherArtist).mp3
-     ```  
-   - If no ID3 data exists, falls back to a simple cleanup of the original filename.  
+     ```
+   - If no ID3 data exists, falls back to a simple cleanup of the original filename.
    - **Undo** reverts these renames as well.
 
-4. **Logging**  
-   - All operations (Preview, Run, Undo) are logged to a file (`operation_logs.txt`), **overwritten** each time an operation is performed.  
+4. **Keyword Rename**  
+   - Searches for files (by a given extension) in the **source** folder that contain a specific keyword in their filename.
+   - Replaces the keyword with a user-specified new string.
+   - Works with any file type (e.g., renaming `"house md s01e12.mp4"` to `"MyHouse md s01e12.mp4"` when replacing `"house"` with `"MyHouse"`).
+   - **Undo** reverts keyword-based renames.
+
+5. **Logging**  
+   - All operations (Preview, Run, Undo) are logged to a file (`operation_logs.txt`), which is overwritten each time an operation is performed.
    - This helps track exactly what changed, what was previewed, and any errors.
 
-5. **Undo** (for all operations)  
-   - Reverses file movements and/or renames.  
-   - Tries to restore original paths or filenames.  
-   - For sorted files, it also removes any newly created **empty** directories in the destination folder.
+6. **Undo** (for all operations)  
+   - Reverses file movements and/or renames.
+   - Tries to restore original paths or filenames.
+   - For sorted files, it also removes any newly created empty directories in the destination folder.
+
+---
+
+## New Features
+
+- **Keyword Rename:**  
+  A new renaming mode that enables users to search for a specific substring in filenames and replace it with a new string.  
+  This feature provides flexibility in bulk editing filenames based on keywords.
+
+- **Mass Rename Extension Flexibility:**  
+  If no file extension is provided or if the extension is set to `"*"` (wildcard), the script now renames **all files** in the source folder while preserving their original extensions.
+
+- **Two GUI Options:**  
+  Users now have a choice between a classic Tkinter interface and a modern PyQt interface.  
+  - **Tkinter GUI** is available in `gui_old.py`.
+  - **PyQt GUI** is available in `gui_new.py`.
 
 ---
 
@@ -56,6 +86,10 @@ You can run it in:
   ```
 - **Tkinter** (included in most Python distributions by default):
   - On Linux, you may need to install `python3-tk`.
+- **PyQt5** (for the modern GUI option). Install via:
+  ```bash
+  pip install PyQt5
+  ```
 
 ---
 
@@ -71,11 +105,11 @@ You can run it in:
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
-3. **Install Mutagen** if you plan to use Music Rename:
+3. **Install Mutagen and PyQt5** if you plan to use Music Rename or the PyQt GUI:
    ```bash
-   pip install mutagen
+   pip install mutagen PyQt5
    ```
-4. You now have everything needed to run the GUI.
+4. You now have everything needed to run either GUI.
 
 ---
 
@@ -83,68 +117,83 @@ You can run it in:
 
 ```
 KP-File_Manager/
-├── main.py          # CLI entry point (optional usage)
-├── sorter.py        # Sorting logic
-├── renamer.py       # Mass & Music renaming logic
-├── gui.py           # Tkinter GUI
-├── config.json      # Category definitions for sorting
-├── utils.py         # Utility functions (optional placeholders)
-└── README.md        # This documentation
+├── main.py           # CLI entry point (optional usage)
+├── sorter.py         # Sorting logic
+├── renamer.py        # Mass, Music & Keyword renaming logic
+├── gui_old.py        # Tkinter GUI (old interface)
+├── gui_new.py        # PyQt GUI (modern interface)
+├── config.json       # Category definitions for sorting
+├── utils.py          # Utility functions (optional placeholders)
+└── README.md         # This documentation
 ```
 
 ---
 
 ## Usage (GUI)
 
-**Launch** the GUI by running:
-```bash
-python gui.py
-```
-You’ll see a window with the following sections:
+**Launch** the GUI by running one of the following commands:
 
-1. **Operation Selection (Radio Buttons)**  
-   - **Sort Files**  
-   - **Mass Rename**  
-   - **Music Rename**  
-   Only **one** can be selected at a time.
+- **Tkinter GUI (Old Interface):**
+  ```bash
+  python gui_old.py
+  ```
 
-2. **Source Folder**  
-   - Click “Browse” to pick the folder containing the files to sort/rename.  
+- **PyQt GUI (Modern Interface):**
+  ```bash
+  python gui_new.py
+  ```
 
-3. **Destination Folder**  
-   - **Only enabled** when “Sort Files” is selected.  
+In the GUI window you will see the following sections:
+
+1. **Operation Selection (Radio Buttons)**
+   - **Sort Files**
+   - **Mass Rename**
+   - **Music Rename**
+   - **Keyword Rename**  
+   Only one can be selected at a time.
+
+2. **Source Folder**
+   - Click “Browse” to pick the folder containing the files to sort/rename.
+
+3. **Destination Folder**
+   - **Only enabled** when “Sort Files” is selected.
    - Click “Browse” to choose where sorted files should go.
 
-4. **Mass Rename Fields**  
-   - **Only visible/enabled** when “Mass Rename” is selected.  
+4. **Mass Rename Fields**
+   - **Only visible/enabled** when “Mass Rename” is selected.
    - **File Extension**: e.g., `mp4`, `jpg`.  
-   - **Prefix**: (X string) to prepend to each new filename.  
-   - **Start Index**: (Y integer) from which numbering begins (e.g., 1 → `001`, 2 → `002` if padded).  
-   - **Zero Padding**: how many digits to pad.  
-   - **Scramble** (checkbox): if checked, files receive **unique random** numbers.  
-   - **Scramble Multiplier (1..10)**: determines the **max range** of those random numbers.  
-     - If you have 10 files and choose multiplier 2, random numbers are from 1..20 without duplicates.
+     *Leave blank or use `*` to rename all files in the folder.*
+   - **Prefix**: A string to prepend to each new filename.
+   - **Start Index**: The starting number for sequential numbering.
+   - **Zero Padding**: How many digits to pad.
+   - **Scramble** (checkbox): If checked, files receive **unique random** numbers.
+   - **Scramble Multiplier (1..10)**: Determines the **max range** of random numbers.
 
-5. **Music Rename**  
-   - **Only** requires a **Source Folder**.  
+5. **Music Rename**
+   - **Only** requires a **Source Folder**.
    - Renames `.mp3` files using ID3 tags:
-     - Format: `TrackNo. Artist - Title (feat. OtherArtists).mp3`.  
-   - If metadata is missing, does a **basic cleanup** of the filename.
+     - Format: `TrackNo. Artist - Title (feat. OtherArtists).mp3`
+   - If metadata is missing, a basic cleanup of the filename is performed.
 
-6. **Buttons**  
-   - **Preview**:  
-     - Runs a **dry-run** mode to **show** (in `operation_logs.txt`) which files **would** be sorted or renamed, **without** actually doing it.  
-   - **Run**:  
-     - Executes the chosen operation for real (sort / rename / music rename).  
-   - **Undo**:  
-     - Attempts to revert the last operation:
-       - **Sort** → moves files back to their original location, removes empty destination folders.  
-       - **Mass Rename** & **Music Rename** → reverts filenames to original.  
-   - **Quit**:  
+6. **Keyword Rename**
+   - **Only visible/enabled** when “Keyword Rename” is selected.
+   - Allows entering:
+     - **File Extension**: Specify the file type (e.g., `mp4`) or leave it as needed.
+     - **Keyword**: The substring to search for in filenames.
+     - **New Keyword**: The string to replace the keyword with.
+
+7. **Buttons**
+   - **Preview**:
+     - Runs a dry-run mode to show (via `operation_logs.txt`) which files would be processed, without making any changes.
+   - **Run**:
+     - Executes the chosen operation for real (sort / rename / music rename / keyword rename).
+   - **Undo**:
+     - Attempts to revert the last operation.
+   - **Quit**:
      - Closes the GUI.
 
 ### Log File
-After each operation (Preview, Run, or Undo), the GUI writes logs to **`operation_logs.txt`**, located in the same directory. The file is **overwritten** each time you do a new operation.
+After each operation (Preview, Run, or Undo), logs are written to **`operation_logs.txt`** located in the same directory. This file is overwritten with each new operation.
 
 ---
 
@@ -155,7 +204,7 @@ If you prefer command-line usage, you can run:
 python main.py --help
 ```
 This script supports arguments like `--sort`, `--mass-rename`, `--music-rename`, `--source`, `--dest`, `--dry-run`, `--undo`, etc.  
-*(You’ll need to adapt the code in `main.py` if you want to incorporate scramble or advanced prefix/padding fields. The GUI is the simpler interface for that.)*
+*(You’ll need to adapt the code in `main.py` if you want to incorporate scramble, keyword renaming, or advanced prefix/padding fields. The GUI is the simpler interface for that.)*
 
 ---
 
@@ -171,34 +220,33 @@ This script supports arguments like `--sort`, `--mass-rename`, `--music-rename`,
     "Archives": ["zip", "rar", "7z"]
   }
   ```
-- When you choose **Sort Files**, the **sorter.py** module reads this JSON (if present) to see where each extension belongs.  
+- When you choose **Sort Files**, the **sorter.py** module reads this JSON (if present) to see where each extension belongs.
   - Files with extensions not listed go into **“Others”** by default.
 
 ---
 
 ## Advanced Notes
 
-1. **Scramble in Mass Rename**  
-   - The application picks a **random unique** integer for each file, in `[1..(file_count * scramble_multiplier)]`.  
-   - Example: If you have 5 `.mp4` files and **scramble_multiplier=3**, random numbers are from `1..15` (no duplicates).  
-   - Zero padding is still applied, so if you set 2, you might see filenames like `Renamed_07.mp4`.
+1. **Scramble in Mass Rename**
+   - The application picks a **random unique** integer for each file in `[1..(file_count * scramble_multiplier)]`.
+   - Example: With 5 `.mp4` files and **scramble_multiplier=3**, random numbers are taken from 1 to 15 (with no duplicates).  
+   - Zero padding is applied as specified.
 
-2. **Zero Padding**  
-   - If you enter `3`, you’ll get `001, 002, 010`, etc.  
-   - If you enter `0`, you’ll get `1, 2, 10, etc.` (no padding).
+2. **Zero Padding**
+   - A value of `3` produces filenames like `001, 002, 010`, etc.
+   - A value of `0` produces numbers without padding.
 
-3. **Undo Limitations**  
-   - The application tries to remember **original** paths (for sorting) or filenames (for renaming) in memory.  
-   - Once you exit the program, that **history** is gone, so you can’t undo previous sessions.  
-   - **If** you do multiple operations in one session, the last undo tries to revert the most recent operation first.
+3. **Undo Limitations**
+   - The application stores original paths/names in memory, so undo works only within the same session.
+   - Once the program is closed, the undo history is lost.
 
-4. **Music Rename**  
-   - Requires **Mutagen** for ID3 reading. If you run into import errors, install via `pip install mutagen`.  
-   - Only tested with `.mp3` files. To support `.flac`, `.m4a`, etc., you’d extend the metadata reading logic (still in `renamer.py`).
+4. **Music Rename**
+   - Requires **Mutagen** for ID3 tag reading. If you encounter import errors, install it via `pip install mutagen`.
+   - Currently tested with `.mp3` files. To support other audio types, extend the metadata reading logic.
 
-5. **Error Handling**  
-   - If something goes wrong (e.g., file conflicts, permissions issues), you’ll see **error logs** in the console and `operation_logs.txt`.  
-   - For random numbering, if the **file_count** is larger than the scramble range, you’ll see a warning in the logs (some fallback approach might apply).
+5. **Error Handling**
+   - Errors (e.g., file conflicts or permission issues) are logged in the console and in `operation_logs.txt`.
+   - For scramble mode, if the file count exceeds the scramble range, a warning is logged and a fallback is applied.
 
 ---
 
@@ -209,24 +257,29 @@ This script supports arguments like `--sort`, `--mass-rename`, `--music-rename`,
      ```bash
      sudo apt-get install python3-tk
      ```
-2. **No “Mutagen”** or “ImportError”**:
-   - Install via `pip install mutagen`.
-3. **Zero Padding Doesn’t Show**:
-   - Ensure you’re entering a valid **integer** (e.g., `2`) in the Zero Padding field.  
-   - Check `operation_logs.txt` to see if the code is receiving `zero_pad=0`.
-4. **Scramble Multiplier** is **ignored**:
-   - Make sure it’s between **1** and **10**. Anything outside this range is clamped to **1**.  
-   - Verify the logs for `scramble_multiplier=...`.
-5. **Undo** Doesn’t Restore**:
-   - Undo only works immediately after an operation. If you close the app and reopen, the memory of old paths/names is lost.  
-   - If some files were manually altered after the operation, undo might fail.
+2. **No “Mutagen” or Import Errors**:
+   - Install via:
+     ```bash
+     pip install mutagen
+     ```
+3. **PyQt Issues**:
+   - Ensure PyQt5 is installed:
+     ```bash
+     pip install PyQt5
+     ```
+4. **Zero Padding Doesn’t Show**:
+   - Verify that you are entering a valid integer in the Zero Padding field and check `operation_logs.txt`.
+5. **Scramble Multiplier Ignored**:
+   - Ensure the value is between **1** and **10**.
+6. **Undo Doesn’t Restore**:
+   - Undo works only immediately after an operation. If files were manually changed after an operation, undo may fail.
 
 ---
 
 ## Contributing
 
-1. Fork the repository and create a new branch.  
-2. Make your changes.  
+1. Fork the repository and create a new branch.
+2. Make your changes.
 3. Submit a pull request with a detailed explanation of your work.
 
 ---
@@ -234,3 +287,4 @@ This script supports arguments like `--sort`, `--mass-rename`, `--music-rename`,
 ### Contact
 
 For questions, suggestions, or to report a bug, feel free to open an **issue** or submit a **pull request**.
+```

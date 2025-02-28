@@ -1,54 +1,47 @@
+# gui_tkinter.py
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import logging
 from pathlib import Path
-import random
 
 from sorter import FileSorter
 from renamer import Renamer
 
 class FileManagerGUI:
     """
-    Radio buttons:
-      - Sort
-      - Mass Rename
-      - Music Rename
-
-    Mass Rename fields:
-      - Extension
-      - Prefix
-      - Start Index
-      - Zero Padding
-      - Scramble (checkbox)
-      - Scramble Multiplier (1..10)
-
-    Only one operation can be chosen at a time.
+    Provides:
+      - Operations via radio buttons: Sort, Mass Rename, Music Rename, Keyword Rename.
+      - For Mass Rename: File Extension, Prefix, Start Index, Zero Padding, Scramble options.
+      - For Keyword Rename: File Extension, Keyword to search for, and New Keyword to replace.
     """
 
     def __init__(self, master):
         self.master = master
-        self.master.title("File Manager")
-
+        self.master.title("File Manager (Tkinter)")
+        
         self.sorter = FileSorter()
         self.renamer = Renamer()
 
-        # Radio button for the operation
-        self.operation_var = tk.StringVar(value="sort")  # "sort", "mass_rename", "music_rename"
+        # Operation radio buttons: "sort", "mass_rename", "music_rename", "keyword_rename"
+        self.operation_var = tk.StringVar(value="sort")
 
         # Common variables
         self.source_var = tk.StringVar()
         self.dest_var = tk.StringVar()
 
-        # Mass rename variables
+        # Mass Rename variables
         self.mass_ext_var = tk.StringVar(value="mp4")
         self.mass_prefix_var = tk.StringVar(value="Renamed_")
         self.mass_start_var = tk.IntVar(value=1)
         self.mass_padding_var = tk.IntVar(value=2)
-
-        # Scramble fields
         self.scramble_var = tk.BooleanVar(value=False)
         self.scramble_multiplier_var = tk.IntVar(value=1)  # 1..10
+
+        # Keyword Rename variables
+        self.key_ext_var = tk.StringVar(value="mp4")
+        self.keyword_var = tk.StringVar()
+        self.new_keyword_var = tk.StringVar()
 
         self.log_file = "operation_logs.txt"
 
@@ -73,6 +66,10 @@ class FileManagerGUI:
             self.master, text="Music Rename", variable=self.operation_var,
             value="music_rename", command=self._update_operation_fields
         )
+        self.rbtn_keyword_rename = ttk.Radiobutton(
+            self.master, text="Keyword Rename", variable=self.operation_var,
+            value="keyword_rename", command=self._update_operation_fields
+        )
 
         # Row 1: Source folder
         self.lbl_source = ttk.Label(self.master, text="Source Folder:")
@@ -84,20 +81,19 @@ class FileManagerGUI:
         self.entry_dest = ttk.Entry(self.master, textvariable=self.dest_var, width=50)
         self.btn_browse_dest = ttk.Button(self.master, text="Browse", command=self._browse_dest)
 
-        # Mass Rename Fields
+        # Row 3: Mass Rename Fields: File Extension and Prefix
         self.lbl_mass_ext = ttk.Label(self.master, text="File Extension:")
         self.entry_mass_ext = ttk.Entry(self.master, textvariable=self.mass_ext_var, width=10)
-
         self.lbl_mass_prefix = ttk.Label(self.master, text="Prefix:")
         self.entry_mass_prefix = ttk.Entry(self.master, textvariable=self.mass_prefix_var, width=10)
 
+        # Row 4: Mass Rename Fields: Start Index and Zero Padding
         self.lbl_mass_start = ttk.Label(self.master, text="Start Index:")
         self.entry_mass_start = ttk.Entry(self.master, textvariable=self.mass_start_var, width=5)
-
         self.lbl_mass_pad = ttk.Label(self.master, text="Zero Padding:")
         self.entry_mass_pad = ttk.Entry(self.master, textvariable=self.mass_padding_var, width=5)
 
-        # Scramble
+        # Row 5: Scramble options for Mass Rename
         self.chk_scramble = ttk.Checkbutton(
             self.master, text="Scramble", variable=self.scramble_var,
             command=self._toggle_scramble_fields
@@ -105,72 +101,86 @@ class FileManagerGUI:
         self.lbl_scramble_mult = ttk.Label(self.master, text="Scramble Multiplier (1..10):")
         self.entry_scramble_mult = ttk.Entry(self.master, textvariable=self.scramble_multiplier_var, width=5)
 
-        # Action Buttons
+        # Row 6: Keyword Rename Fields (File Extension and Keyword)
+        self.lbl_key_ext = ttk.Label(self.master, text="Keyword Rename Extension:")
+        self.entry_key_ext = ttk.Entry(self.master, textvariable=self.key_ext_var, width=10)
+        self.lbl_keyword = ttk.Label(self.master, text="Keyword:")
+        self.entry_keyword = ttk.Entry(self.master, textvariable=self.keyword_var, width=20)
+
+        # Row 7: Keyword Rename Field (New Keyword)
+        self.lbl_new_keyword = ttk.Label(self.master, text="New Keyword:")
+        self.entry_new_keyword = ttk.Entry(self.master, textvariable=self.new_keyword_var, width=20)
+
+        # Row 8: Action Buttons
         self.btn_preview = ttk.Button(self.master, text="Preview", command=self.on_preview)
         self.btn_run = ttk.Button(self.master, text="Run", command=self.on_run)
         self.btn_undo = ttk.Button(self.master, text="Undo", command=self.on_undo)
         self.btn_quit = ttk.Button(self.master, text="Quit", command=self.master.quit)
 
+    # --------------------------------------------------------------------------
+    # LAYOUT WIDGETS
+    # --------------------------------------------------------------------------
     def _layout_widgets(self):
-        # Row 0: Radio Buttons (Sort, Mass Rename, Music Rename)
+        # Row 0: Operation Radio Buttons
         self.rbtn_sort.grid(row=0, column=0, padx=5, pady=5, sticky=tk.W)
         self.rbtn_mass_rename.grid(row=0, column=1, padx=5, pady=5, sticky=tk.W)
         self.rbtn_music_rename.grid(row=0, column=2, padx=5, pady=5, sticky=tk.W)
+        self.rbtn_keyword_rename.grid(row=0, column=3, padx=5, pady=5, sticky=tk.W)
 
-        # Row 1: Source
+        # Row 1: Source Folder
         self.lbl_source.grid(row=1, column=0, padx=5, pady=5, sticky=tk.E)
-        self.entry_source.grid(row=1, column=1, padx=5, pady=5)
-        self.btn_browse_source.grid(row=1, column=2, padx=5, pady=5, sticky=tk.W)
+        self.entry_source.grid(row=1, column=1, columnspan=2, padx=5, pady=5)
+        self.btn_browse_source.grid(row=1, column=3, padx=5, pady=5, sticky=tk.W)
 
-        # Row 2: Destination
+        # Row 2: Destination Folder (for sort)
         self.lbl_dest.grid(row=2, column=0, padx=5, pady=5, sticky=tk.E)
-        self.entry_dest.grid(row=2, column=1, padx=5, pady=5)
-        self.btn_browse_dest.grid(row=2, column=2, padx=5, pady=5, sticky=tk.W)
+        self.entry_dest.grid(row=2, column=1, columnspan=2, padx=5, pady=5)
+        self.btn_browse_dest.grid(row=2, column=3, padx=5, pady=5, sticky=tk.W)
 
-        # Row 3: Mass Rename Fields
+        # Row 3: Mass Rename - File Extension and Prefix
         self.lbl_mass_ext.grid(row=3, column=0, padx=5, pady=5, sticky=tk.E)
         self.entry_mass_ext.grid(row=3, column=1, padx=5, pady=5, sticky=tk.W)
-
         self.lbl_mass_prefix.grid(row=3, column=2, padx=5, pady=5, sticky=tk.E)
         self.entry_mass_prefix.grid(row=3, column=3, padx=5, pady=5, sticky=tk.W)
 
-        # Row 4: More Mass Rename Fields
+        # Row 4: Mass Rename - Start Index and Zero Padding
         self.lbl_mass_start.grid(row=4, column=0, padx=5, pady=5, sticky=tk.E)
         self.entry_mass_start.grid(row=4, column=1, padx=5, pady=5, sticky=tk.W)
-
         self.lbl_mass_pad.grid(row=4, column=2, padx=5, pady=5, sticky=tk.E)
         self.entry_mass_pad.grid(row=4, column=3, padx=5, pady=5, sticky=tk.W)
 
-        # Row 5: Scramble
+        # Row 5: Mass Rename - Scramble Options
         self.chk_scramble.grid(row=5, column=0, padx=5, pady=5, sticky=tk.W)
         self.lbl_scramble_mult.grid(row=5, column=1, padx=5, pady=5, sticky=tk.E)
         self.entry_scramble_mult.grid(row=5, column=2, padx=5, pady=5, sticky=tk.W)
 
-        # Row 6: Buttons
-        self.btn_preview.grid(row=6, column=0, padx=5, pady=10)
-        self.btn_run.grid(row=6, column=1, padx=5, pady=10)
-        self.btn_undo.grid(row=6, column=2, padx=5, pady=10)
-        self.btn_quit.grid(row=6, column=3, padx=5, pady=10)
+        # Row 6: Keyword Rename - Extension and Keyword
+        self.lbl_key_ext.grid(row=6, column=0, padx=5, pady=5, sticky=tk.E)
+        self.entry_key_ext.grid(row=6, column=1, padx=5, pady=5, sticky=tk.W)
+        self.lbl_keyword.grid(row=6, column=2, padx=5, pady=5, sticky=tk.E)
+        self.entry_keyword.grid(row=6, column=3, padx=5, pady=5, sticky=tk.W)
+
+        # Row 7: Keyword Rename - New Keyword
+        self.lbl_new_keyword.grid(row=7, column=0, padx=5, pady=5, sticky=tk.E)
+        self.entry_new_keyword.grid(row=7, column=1, padx=5, pady=5, sticky=tk.W)
+
+        # Row 8: Action Buttons
+        self.btn_preview.grid(row=8, column=0, padx=5, pady=10)
+        self.btn_run.grid(row=8, column=1, padx=5, pady=10)
+        self.btn_undo.grid(row=8, column=2, padx=5, pady=10)
+        self.btn_quit.grid(row=8, column=3, padx=5, pady=10)
 
     # --------------------------------------------------------------------------
-    # TOGGLE FIELDS
+    # UPDATE FIELDS BASED ON SELECTED OPERATION
     # --------------------------------------------------------------------------
     def _update_operation_fields(self):
-        """
-        Enable/disable widgets depending on operation_var:
-         - "sort" => Destination is enabled, mass rename fields disabled
-         - "mass_rename" => Show mass rename fields, hide destination
-         - "music_rename" => Hide both
-        """
         op = self.operation_var.get()
-
         if op == "sort":
-            # Enable dest
+            # Enable destination fields.
             self._enable_widget(self.lbl_dest)
             self._enable_widget(self.entry_dest)
             self._enable_widget(self.btn_browse_dest)
-
-            # Disable mass rename
+            # Disable mass rename fields.
             self._disable_widget(self.lbl_mass_ext)
             self._disable_widget(self.entry_mass_ext)
             self._disable_widget(self.lbl_mass_prefix)
@@ -182,14 +192,20 @@ class FileManagerGUI:
             self._disable_widget(self.chk_scramble)
             self._disable_widget(self.lbl_scramble_mult)
             self._disable_widget(self.entry_scramble_mult)
+            # Disable keyword rename fields.
+            self._disable_widget(self.lbl_key_ext)
+            self._disable_widget(self.entry_key_ext)
+            self._disable_widget(self.lbl_keyword)
+            self._disable_widget(self.entry_keyword)
+            self._disable_widget(self.lbl_new_keyword)
+            self._disable_widget(self.entry_new_keyword)
 
         elif op == "mass_rename":
-            # Disable dest
+            # Disable destination.
             self._disable_widget(self.lbl_dest)
             self._disable_widget(self.entry_dest)
             self._disable_widget(self.btn_browse_dest)
-
-            # Enable mass rename
+            # Enable mass rename fields.
             self._enable_widget(self.lbl_mass_ext)
             self._enable_widget(self.entry_mass_ext)
             self._enable_widget(self.lbl_mass_prefix)
@@ -199,17 +215,21 @@ class FileManagerGUI:
             self._enable_widget(self.lbl_mass_pad)
             self._enable_widget(self.entry_mass_pad)
             self._enable_widget(self.chk_scramble)
-
-            # Then toggle the scramble multiplier field
-            self._toggle_scramble_fields()
+            self._enable_widget(self.lbl_scramble_mult)
+            self._enable_widget(self.entry_scramble_mult)
+            # Disable keyword rename fields.
+            self._disable_widget(self.lbl_key_ext)
+            self._disable_widget(self.entry_key_ext)
+            self._disable_widget(self.lbl_keyword)
+            self._disable_widget(self.entry_keyword)
+            self._disable_widget(self.lbl_new_keyword)
+            self._disable_widget(self.entry_new_keyword)
 
         elif op == "music_rename":
-            # Disable dest
+            # Disable destination, mass rename, and keyword rename fields.
             self._disable_widget(self.lbl_dest)
             self._disable_widget(self.entry_dest)
             self._disable_widget(self.btn_browse_dest)
-
-            # Disable mass rename
             self._disable_widget(self.lbl_mass_ext)
             self._disable_widget(self.entry_mass_ext)
             self._disable_widget(self.lbl_mass_prefix)
@@ -221,11 +241,38 @@ class FileManagerGUI:
             self._disable_widget(self.chk_scramble)
             self._disable_widget(self.lbl_scramble_mult)
             self._disable_widget(self.entry_scramble_mult)
+            self._disable_widget(self.lbl_key_ext)
+            self._disable_widget(self.entry_key_ext)
+            self._disable_widget(self.lbl_keyword)
+            self._disable_widget(self.entry_keyword)
+            self._disable_widget(self.lbl_new_keyword)
+            self._disable_widget(self.entry_new_keyword)
+
+        elif op == "keyword_rename":
+            # Disable destination and mass rename fields.
+            self._disable_widget(self.lbl_dest)
+            self._disable_widget(self.entry_dest)
+            self._disable_widget(self.btn_browse_dest)
+            self._disable_widget(self.lbl_mass_ext)
+            self._disable_widget(self.entry_mass_ext)
+            self._disable_widget(self.lbl_mass_prefix)
+            self._disable_widget(self.entry_mass_prefix)
+            self._disable_widget(self.lbl_mass_start)
+            self._disable_widget(self.entry_mass_start)
+            self._disable_widget(self.lbl_mass_pad)
+            self._disable_widget(self.entry_mass_pad)
+            self._disable_widget(self.chk_scramble)
+            self._disable_widget(self.lbl_scramble_mult)
+            self._disable_widget(self.entry_scramble_mult)
+            # Enable keyword rename fields.
+            self._enable_widget(self.lbl_key_ext)
+            self._enable_widget(self.entry_key_ext)
+            self._enable_widget(self.lbl_keyword)
+            self._enable_widget(self.entry_keyword)
+            self._enable_widget(self.lbl_new_keyword)
+            self._enable_widget(self.entry_new_keyword)
 
     def _toggle_scramble_fields(self):
-        """
-        If scramble_var is True, enable the scramble multiplier field, else disable it.
-        """
         if self.scramble_var.get():
             self._enable_widget(self.lbl_scramble_mult)
             self._enable_widget(self.entry_scramble_mult)
@@ -246,7 +293,7 @@ class FileManagerGUI:
             pass
 
     # --------------------------------------------------------------------------
-    # BROWSE
+    # BROWSE FUNCTIONS
     # --------------------------------------------------------------------------
     def _browse_source(self):
         directory = filedialog.askdirectory()
@@ -259,17 +306,15 @@ class FileManagerGUI:
             self.dest_var.set(directory)
 
     # --------------------------------------------------------------------------
-    # LOGGING
+    # LOGGING SETUP
     # --------------------------------------------------------------------------
     def _setup_file_logger(self):
         if os.path.exists(self.log_file):
             os.remove(self.log_file)
-
         file_handler = logging.FileHandler(self.log_file, mode='w', encoding='utf-8')
         file_handler.setLevel(logging.INFO)
         formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         file_handler.setFormatter(formatter)
-
         root_logger = logging.getLogger()
         root_logger.addHandler(file_handler)
         return file_handler
@@ -280,7 +325,7 @@ class FileManagerGUI:
         file_handler.close()
 
     # --------------------------------------------------------------------------
-    # PREVIEW, RUN, UNDO
+    # PREVIEW, RUN, UNDO METHODS
     # --------------------------------------------------------------------------
     def on_preview(self):
         source = self.source_var.get()
@@ -321,7 +366,7 @@ class FileManagerGUI:
                 scramble_mult = 1
 
             logging.info(
-                f"Preview mass rename: ext='{ext}', prefix='{prefix}', start_index={start_index}, "
+                f"Preview Mass Rename: ext='{ext}', prefix='{prefix}', start_index={start_index}, "
                 f"zero_pad={zero_pad}, scramble={scramble}, scramble_multiplier={scramble_mult}"
             )
 
@@ -338,6 +383,25 @@ class FileManagerGUI:
 
         elif op == "music_rename":
             self.renamer.rename_music(folder=source, extensions=["mp3"], dry_run=True)
+
+        elif op == "keyword_rename":
+            ext = self.key_ext_var.get()
+            keyword = self.keyword_var.get()
+            new_keyword = self.new_keyword_var.get()
+            if not keyword:
+                messagebox.showwarning("Warning", "Please enter the keyword to search for.")
+                self._cleanup_file_logger(fh)
+                return
+            logging.info(
+                f"Preview Keyword Rename: ext='{ext}', keyword='{keyword}', new_keyword='{new_keyword}'"
+            )
+            self.renamer.rename_by_keyword(
+                folder=source,
+                file_extension=ext,
+                keyword=keyword,
+                new_keyword=new_keyword,
+                dry_run=True
+            )
 
         self._cleanup_file_logger(fh)
         messagebox.showinfo("Preview Complete", f"Logs written to '{self.log_file}'.")
@@ -381,7 +445,7 @@ class FileManagerGUI:
                 scramble_mult = 1
 
             logging.info(
-                f"Mass rename: ext='{ext}', prefix='{prefix}', start_index={start_index}, "
+                f"Run Mass Rename: ext='{ext}', prefix='{prefix}', start_index={start_index}, "
                 f"zero_pad={zero_pad}, scramble={scramble}, scramble_multiplier={scramble_mult}"
             )
 
@@ -400,6 +464,26 @@ class FileManagerGUI:
         elif op == "music_rename":
             self.renamer.rename_music(folder=source, extensions=["mp3"], preserve_timestamps=True, dry_run=False)
 
+        elif op == "keyword_rename":
+            ext = self.key_ext_var.get()
+            keyword = self.keyword_var.get()
+            new_keyword = self.new_keyword_var.get()
+            if not keyword:
+                messagebox.showwarning("Warning", "Please enter the keyword to search for.")
+                self._cleanup_file_logger(fh)
+                return
+            logging.info(
+                f"Run Keyword Rename: ext='{ext}', keyword='{keyword}', new_keyword='{new_keyword}'"
+            )
+            self.renamer.rename_by_keyword(
+                folder=source,
+                file_extension=ext,
+                keyword=keyword,
+                new_keyword=new_keyword,
+                preserve_timestamps=True,
+                dry_run=False
+            )
+
         self._cleanup_file_logger(fh)
         messagebox.showinfo("Operation Complete", f"Logs have been written to '{self.log_file}'.")
 
@@ -413,12 +497,11 @@ class FileManagerGUI:
         try:
             if op == "sort":
                 self.sorter.undo()
-                # Remove empty dirs in the destination, if desired
                 dest = self.dest_var.get()
                 if dest:
                     self._remove_empty_dirs(Path(dest))
             else:
-                # mass_rename or music_rename => same rename undo
+                # mass_rename, music_rename, or keyword_rename
                 self.renamer.undo()
         except Exception as e:
             success = False
