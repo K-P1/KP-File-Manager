@@ -135,7 +135,7 @@ class Renamer:
     def rename_music(
         self,
         folder: str,
-        extensions: List[str] = None,
+        extensions: List[str] = None, # type: ignore
         dry_run: bool = False,
         preserve_timestamps: bool = False
     ):
