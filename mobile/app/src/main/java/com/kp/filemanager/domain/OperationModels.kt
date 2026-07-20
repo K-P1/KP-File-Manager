@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines platform-neutral file operation inputs and previews; last updated with explicit operation descriptions. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines platform-neutral file operation inputs and previews; last updated to retain extensions for interrupted batch renames. */
 package com.kp.filemanager.domain
 
 data class AudioMetadata(
@@ -14,6 +14,7 @@ data class FileCandidate(
     val isDirectory: Boolean,
     val descendantExtensions: List<String>,
     val metadata: AudioMetadata = AudioMetadata(),
+    val recoveryExtension: String? = null,
 )
 
 enum class ChangeKind {

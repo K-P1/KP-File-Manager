@@ -1,4 +1,4 @@
-/** mobile/app/src/test/java/com/kp/filemanager/domain/OperationPlannerTest.kt: Defines mobile feature parity before implementation; created test-first. */
+/** mobile/app/src/test/java/com/kp/filemanager/domain/OperationPlannerTest.kt: Covers deterministic mobile operation plans; last updated for interrupted batch-rename recovery. */
 package com.kp.filemanager.domain
 
 import kotlin.random.Random
@@ -54,6 +54,21 @@ class OperationPlannerTest {
     }
 
     @Test
+    fun `mass rename restores the original extension from an interrupted temporary rename`() {
+        val changes = planner.planMassRename(
+            candidates = listOf(candidate(".kp_550e8400-e29b-41d4-a716-446655440000_mp4", recoveryExtension = "mp4")),
+            extensionFilter = "mp4",
+            prefix = "Clip_",
+            startIndex = 1,
+            zeroPadding = 3,
+            scramble = false,
+            scrambleMultiplier = 1,
+        )
+
+        assertEquals(listOf("Clip_001.mp4"), changes.map { it.targetName })
+    }
+
+    @Test
     fun `scramble produces unique values inside the configured range`() {
         val files = (1..8).map { candidate("$it.mp4") }
 
@@ -99,6 +114,7 @@ class OperationPlannerTest {
         track: String? = null,
         artist: String? = null,
         title: String? = null,
+        recoveryExtension: String? = null,
     ) = FileCandidate(
         uri = "content://test/$name",
         parentUri = "content://test/root",
@@ -106,5 +122,6 @@ class OperationPlannerTest {
         isDirectory = false,
         descendantExtensions = emptyList(),
         metadata = AudioMetadata(track, artist, title),
+        recoveryExtension = recoveryExtension,
     )
 }

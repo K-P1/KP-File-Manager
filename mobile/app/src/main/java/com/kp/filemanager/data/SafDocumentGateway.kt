@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/data/SafDocumentGateway.kt: Implements permission-free folder access, metadata, moves, and undo through Android SAF; created for mobile parity. */
+/** mobile/app/src/main/java/com/kp/filemanager/data/SafDocumentGateway.kt: Implements permission-free folder access, metadata, moves, and undo through Android SAF; last updated for safe, single-pass batch renames and interrupted-rename recovery. */
 package com.kp.filemanager.data
 
 import android.content.ContentResolver
@@ -14,7 +14,6 @@ import com.kp.filemanager.domain.FileCandidate
 import com.kp.filemanager.domain.PlannedChange
 import java.io.FileNotFoundException
 import java.io.IOException
-import java.util.UUID
 
 class SafDocumentGateway(context: Context) : DocumentGateway {
     private val appContext = context.applicationContext
@@ -38,6 +37,7 @@ class SafDocumentGateway(context: Context) : DocumentGateway {
                 } else {
                     AudioMetadata()
                 },
+                recoveryExtension = temporaryRenameExtension(name),
             )
         }
     }
@@ -53,25 +53,15 @@ class SafDocumentGateway(context: Context) : DocumentGateway {
     }
 
     override fun renameBatch(changes: List<PlannedChange>): Pair<List<DocumentMutation>, List<String>> {
-        val staged = mutableListOf<Pair<PlannedChange, Uri>>()
+        if (changes.isEmpty()) return emptyList<DocumentMutation>() to emptyList()
         val completed = mutableListOf<DocumentMutation>()
         val failures = mutableListOf<String>()
+        val parent = document(changes.first().sourceParentUri)
+        val targetNames = reserveTargetNames(parent, changes)
 
-        changes.forEach { change ->
+        changes.zip(targetNames).forEach { (change, targetName) ->
             try {
-                val temporaryName = ".kp_${UUID.randomUUID()}_${change.sourceName.substringAfterLast('.', "tmp")}" 
-                val temporaryUri = rename(Uri.parse(change.sourceUri), temporaryName)
-                staged += change to temporaryUri
-            } catch (error: Exception) {
-                failures += "${change.sourceName}: ${error.message ?: "Could not prepare rename"}"
-            }
-        }
-
-        staged.forEach { (change, temporaryUri) ->
-            try {
-                val parent = document(change.sourceParentUri)
-                val targetName = uniqueName(parent, change.targetName)
-                val currentUri = rename(temporaryUri, targetName)
+                val currentUri = rename(Uri.parse(change.sourceUri), targetName)
                 completed += DocumentMutation(
                     currentUri = currentUri.toString(),
                     currentParentUri = change.sourceParentUri,
@@ -79,8 +69,7 @@ class SafDocumentGateway(context: Context) : DocumentGateway {
                     originalName = change.sourceName,
                 )
             } catch (error: Exception) {
-                runCatching { rename(temporaryUri, change.sourceName) }
-                failures += "${change.sourceName}: ${error.message ?: "Could not finish rename"}"
+                failures += "${change.sourceName}: ${error.message ?: "Could not rename"}"
             }
         }
         return completed to failures
@@ -212,9 +201,43 @@ class SafDocumentGateway(context: Context) : DocumentGateway {
         return candidate
     }
 
+    private fun reserveTargetNames(parent: DocumentFile, changes: List<PlannedChange>): List<String> {
+        val occupied = parent.listFiles().mapNotNull { it.name }.toMutableSet()
+        return changes.map { change ->
+            occupied.remove(change.sourceName)
+            val target = reserveUniqueName(occupied, change.targetName)
+            occupied += target
+            target
+        }
+    }
+
+    private fun reserveUniqueName(occupied: Set<String>, requestedName: String): String {
+        if (requestedName !in occupied) return requestedName
+        val stem = requestedName.substringBeforeLast('.', requestedName)
+        val extension = requestedName.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }
+        var counter = 1
+        var candidate: String
+        do {
+            candidate = "${stem}_$counter$extension"
+            counter += 1
+        } while (candidate in occupied)
+        return candidate
+    }
+
+    private fun temporaryRenameExtension(name: String): String? = TEMPORARY_RENAME_PATTERN
+        .matchEntire(name)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.lowercase()
+        ?.takeIf(String::isNotBlank)
+
     private fun rename(uri: Uri, name: String): Uri =
         checkNotNull(DocumentsContract.renameDocument(resolver, uri, name)) { "The provider declined the rename." }
 
     private fun document(uri: String): DocumentFile =
         checkNotNull(DocumentFile.fromTreeUri(appContext, Uri.parse(uri))) { "The selected folder is no longer available." }
+
+    private companion object {
+        val TEMPORARY_RENAME_PATTERN = Regex("^\\.kp_[0-9a-fA-F-]{36}_(.+)$")
+    }
 }

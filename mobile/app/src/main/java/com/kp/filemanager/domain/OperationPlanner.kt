@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt: Produces deterministic, testable file-operation plans; created from desktop parity tests. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt: Produces deterministic, testable file-operation plans; last updated to recover interrupted batch-renames with their original extensions. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
@@ -47,7 +47,7 @@ class OperationPlanner(
 
         return matches.zip(numbers).map { (candidate, number) ->
             val padded = number.toString().padStart(zeroPadding.coerceAtLeast(0), '0')
-            candidate.renameTo(sanitizeFilename("$prefix$padded.${extensionOf(candidate.name)}"))
+            candidate.renameTo(sanitizeFilename("$prefix$padded.${candidate.extension}"))
         }
     }
 
@@ -62,7 +62,7 @@ class OperationPlanner(
             .filter { keyword in stemOf(it.name) }
             .map { candidate ->
                 val newStem = stemOf(candidate.name).replace(keyword, replacement)
-                candidate.renameTo(sanitizeFilename("$newStem.${extensionOf(candidate.name)}"))
+                candidate.renameTo(sanitizeFilename("$newStem.${candidate.extension}"))
             }
     }
 
@@ -122,7 +122,7 @@ class OperationPlanner(
         return candidates
             .asSequence()
             .filterNot(FileCandidate::isDirectory)
-            .filter { normalizedFilter.isBlank() || normalizedFilter == "*" || extensionOf(it.name) == normalizedFilter }
+            .filter { normalizedFilter.isBlank() || normalizedFilter == "*" || it.extension == normalizedFilter }
             .sortedBy { it.name.lowercase(Locale.ROOT) }
             .toList()
     }
@@ -152,6 +152,9 @@ class OperationPlanner(
         targetName = newName,
         kind = ChangeKind.RENAME,
     )
+
+    private val FileCandidate.extension: String
+        get() = recoveryExtension ?: extensionOf(name)
 
     companion object {
         private val DEFAULT_CATEGORIES = mapOf(
