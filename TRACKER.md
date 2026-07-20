@@ -18,6 +18,16 @@
 
 ## 2026-07-20 — Self-guided file operation UI
 
+## 2026-07-21 - Android batch-rename recovery and performance
+
+- Changed: batch rename now renames each item directly, reserves collision-free target names from one folder listing, and recognizes interrupted `.kp_<uuid>_<extension>` temporary names as their original file type when planning a new batch operation.
+- Why: prevent files from being stranded as hidden temporary files after a provider failure and reduce a 256-file batch from roughly 512 provider rename calls plus repeated name lookups to 256 renames and one initial listing.
+- Files: `mobile/app/src/main/java/com/kp/filemanager/data/SafDocumentGateway.kt`, `mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt`, `mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt`, `mobile/app/src/test/java/com/kp/filemanager/domain/OperationPlannerTest.kt`.
+- Checks: added and passed the interrupted-temporary-file extension regression test; `testDebugUnitTest lintDebug assembleDebug` passed with Android Studio JBR and Android SDK configured. Debug APK rebuilt.
+- Attention: on-device verification remains needed because each Android document provider implements rename behaviour independently. The repository's `run_checks.bat` requires its bundled JBR when the shell already exports an incompatible JDK.
+
+## 2026-07-20 - Self-guided file operation UI
+
 - Changed: replaced promotional and ambiguous interface copy with numbered workflow steps, concise operation descriptions, selected-folder references, explicit review/apply actions, and visible in-progress text with loading bars.
 - Why: make both clients understandable from the screen itself and keep users informed while an operation is running.
 - Files: `desktop/src/kp_file_manager/gui_qt.py`, `mobile/app/src/main/java/com/kp/filemanager/ui/`, `mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt`.
