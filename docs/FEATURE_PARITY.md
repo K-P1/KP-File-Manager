@@ -16,3 +16,5 @@
 The Android app uses the platform Storage Access Framework. The user grants access through the system folder picker; no root access, broad storage permission, or companion file-manager app is required.
 
 Android 11 and newer do not allow the picker to grant access to storage roots, the `Download` root, `Android/data`, or `Android/obb`. Individual document providers can also decline rename or move operations. The app reports such failures per item and uses copy/delete as a move fallback when the provider permits both operations.
+
+Native moves and renames normally retain file metadata. A copy/delete fallback can assign a new modified timestamp because SAF does not offer a portable API for restoring timestamps across providers.

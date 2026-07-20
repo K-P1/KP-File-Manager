@@ -6,5 +6,7 @@ desktop/runtime/*.txt
 desktop/build/
 desktop/*.egg-info/
 mobile/.gradle/
+mobile/.kotlin/
 mobile/local.properties
+mobile/*.log
 mobile/**/build/

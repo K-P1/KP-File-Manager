@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt: Owns mobile form state and repository operations; created for the Compose screen. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt: Owns mobile form, progress, and repository operation state; last updated for operation feedback. */
 package com.kp.filemanager.ui
 
 import androidx.compose.runtime.Stable
@@ -70,12 +70,20 @@ class FileManagerViewModel(
     override fun undo() {
         if (_uiState.value.isWorking || !repository.canUndo()) return
         viewModelScope.launch {
-            mutate { copy(isWorking = true, statusTitle = null, statusMessage = null) }
+            mutate {
+                copy(
+                    isWorking = true,
+                    progressText = "Restoring the previous operation…",
+                    statusTitle = null,
+                    statusMessage = null,
+                )
+            }
             repository.undoLast().fold(
                 onSuccess = { result ->
                     mutate {
                         copy(
                             isWorking = false,
+                            progressText = "",
                             preview = emptyList(),
                             statusTitle = if (result.failures.isEmpty()) "Undo complete" else "Undo partly complete",
                             statusMessage = "Restored ${result.completedCount} item(s).",
@@ -96,7 +104,15 @@ class FileManagerViewModel(
         if (!snapshot.canRun) return
         val request = snapshot.toRequest()
         viewModelScope.launch {
-            mutate { copy(isWorking = true, statusTitle = null, statusMessage = null, failures = emptyList()) }
+            mutate {
+                copy(
+                    isWorking = true,
+                    progressText = if (previewOnly) "Checking the selected folder and building a change list…" else "Applying changes to the selected folder…",
+                    statusTitle = null,
+                    statusMessage = null,
+                    failures = emptyList(),
+                )
+            }
             val result = if (previewOnly) repository.preview(request) else repository.execute(request)
             result.fold(
                 onSuccess = { outcome ->
@@ -113,6 +129,7 @@ class FileManagerViewModel(
                     mutate {
                         copy(
                             isWorking = false,
+                            progressText = "",
                             preview = outcome.changes,
                             statusTitle = title,
                             statusMessage = message,
@@ -129,6 +146,7 @@ class FileManagerViewModel(
     private fun showFailure(error: Throwable) = mutate {
         copy(
             isWorking = false,
+            progressText = "",
             statusTitle = "Couldn’t complete the operation",
             statusMessage = error.message ?: "Check that the selected folder still allows changes.",
         )

@@ -2,14 +2,17 @@
 package com.kp.filemanager.data
 
 import android.content.Context
-import java.time.Instant
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class OperationLogStore(context: Context) {
     private val logFile = context.filesDir.resolve("operation_logs.txt")
 
     fun replace(operation: String, lines: List<String>) {
         logFile.bufferedWriter().use { writer ->
-            writer.appendLine("${Instant.now()} [$operation]")
+            val timestamp = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.ROOT).format(Date())
+            writer.appendLine("$timestamp [$operation]")
             lines.forEach(writer::appendLine)
         }
     }

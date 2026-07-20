@@ -1,4 +1,4 @@
-"""desktop/src/kp_file_manager/gui_qt.py: Primary PyQt desktop UI; updated for packaged paths."""
+"""desktop/src/kp_file_manager/gui_qt.py: Primary PyQt file-operation UI with explicit workflow and status feedback; last updated for clearer guidance and progress visibility."""
 
 import sys
 import os
@@ -7,7 +7,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QRadioButton, QButtonGroup,
-    QFileDialog, QMessageBox, QCheckBox, QSpinBox, QStackedWidget
+    QFileDialog, QMessageBox, QCheckBox, QSpinBox, QStackedWidget, QProgressBar, QGroupBox
 )
 from PyQt5.QtCore import Qt
 
@@ -43,7 +43,7 @@ QLabel, QRadioButton, QCheckBox {
 class FileManagerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("File Manager - Dark Mode")
+        self.setWindowTitle("KP File Manager")
         self.sorter = FileSorter()
         self.renamer = Renamer()
         self._init_ui()
@@ -54,7 +54,13 @@ class FileManagerWindow(QMainWindow):
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
 
-        # Operation selection (radio buttons)
+        workflow_label = QLabel("1. Select an operation, 2. choose folders, 3. set options, 4. review changes, then apply them.")
+        workflow_label.setWordWrap(True)
+        main_layout.addWidget(workflow_label)
+
+        operation_group = QGroupBox("1. Operation")
+        operation_layout = QVBoxLayout(operation_group)
+        operation_layout.addWidget(QLabel("Choose what to do. The options below update for the selected operation."))
         op_layout = QHBoxLayout()
         self.radio_sort = QRadioButton("Sort Files")
         self.radio_mass = QRadioButton("Mass Rename")
@@ -65,36 +71,51 @@ class FileManagerWindow(QMainWindow):
         for i, btn in enumerate([self.radio_sort, self.radio_mass, self.radio_music, self.radio_keyword]):
             self.op_group.addButton(btn, i)
             op_layout.addWidget(btn)
-        main_layout.addLayout(op_layout)
+        operation_layout.addLayout(op_layout)
+        self.operation_help = QLabel()
+        self.operation_help.setWordWrap(True)
+        operation_layout.addWidget(self.operation_help)
+        main_layout.addWidget(operation_group)
 
-        # Source folder input
+        folders_group = QGroupBox("2. Folders")
+        folders_layout = QVBoxLayout(folders_group)
         source_layout = QHBoxLayout()
-        source_layout.addWidget(QLabel("Source Folder:"))
+        source_layout.addWidget(QLabel("Source folder (files to process):"))
         self.source_edit = QLineEdit()
+        self.source_edit.setPlaceholderText("Choose the folder containing the files you want to process")
+        self.source_edit.setToolTip("Full selected folder path")
         source_layout.addWidget(self.source_edit)
         btn_browse_source = QPushButton("Browse")
         btn_browse_source.clicked.connect(self._browse_source)
         source_layout.addWidget(btn_browse_source)
-        main_layout.addLayout(source_layout)
+        folders_layout.addLayout(source_layout)
 
-        # Destination folder input (optional)
         dest_layout = QHBoxLayout()
-        dest_layout.addWidget(QLabel("Destination Folder (optional):"))
+        dest_layout.addWidget(QLabel("Destination folder (optional for sorting):"))
         self.dest_edit = QLineEdit()
+        self.dest_edit.setPlaceholderText("Leave empty to create category folders inside the source folder")
+        self.dest_edit.setToolTip("Full selected destination folder path")
         dest_layout.addWidget(self.dest_edit)
         btn_browse_dest = QPushButton("Browse")
         btn_browse_dest.clicked.connect(self._browse_dest)
         dest_layout.addWidget(btn_browse_dest)
-        main_layout.addLayout(dest_layout)
+        folders_layout.addLayout(dest_layout)
+        main_layout.addWidget(folders_group)
 
-        # Operation-specific options container
+        settings_group = QGroupBox("3. Operation settings")
+        settings_layout = QVBoxLayout(settings_group)
+        self.settings_help = QLabel()
+        self.settings_help.setWordWrap(True)
+        settings_layout.addWidget(self.settings_help)
         self.stacked = QStackedWidget()
-        main_layout.addWidget(self.stacked)
+        settings_layout.addWidget(self.stacked)
+        main_layout.addWidget(settings_group)
 
         # Sort options
         sort_widget = QWidget()
         sort_layout = QHBoxLayout(sort_widget)
-        self.series_mode_check = QCheckBox("Series Mode (Group by Title)")
+        self.series_mode_check = QCheckBox("Group matching series titles")
+        self.series_mode_check.setToolTip("Moves files with the same normalized title into one folder instead of file-type categories.")
         sort_layout.addWidget(self.series_mode_check)
         sort_layout.addStretch()
         self.stacked.addWidget(sort_widget)
@@ -116,13 +137,13 @@ class FileManagerWindow(QMainWindow):
         self.scramble_mult_spin.setValue(1)
         self.scramble_mult_spin.setEnabled(False)
 
-        mass_layout.addWidget(QLabel("Ext:"))
+        mass_layout.addWidget(QLabel("File type:"))
         mass_layout.addWidget(self.mass_ext_edit)
         mass_layout.addWidget(QLabel("Prefix:"))
         mass_layout.addWidget(self.mass_prefix_edit)
         mass_layout.addWidget(QLabel("Start:"))
         mass_layout.addWidget(self.mass_start_spin)
-        mass_layout.addWidget(QLabel("Pad:"))
+        mass_layout.addWidget(QLabel("Digits:"))
         mass_layout.addWidget(self.mass_pad_spin)
         mass_layout.addWidget(self.scramble_check)
         mass_layout.addWidget(QLabel("Scramble Multiplier:"))
@@ -133,7 +154,7 @@ class FileManagerWindow(QMainWindow):
         # Music Rename - no options, just info label
         music_widget = QWidget()
         music_layout = QVBoxLayout(music_widget)
-        music_layout.addWidget(QLabel("No additional settings required for Music Rename."))
+        music_layout.addWidget(QLabel("Uses available MP3 track metadata. Files without complete tags receive a cleaned filename."))
         music_layout.addStretch()
         self.stacked.addWidget(music_widget)
 
@@ -143,20 +164,33 @@ class FileManagerWindow(QMainWindow):
         self.key_ext_edit = QLineEdit("mp4")
         self.keyword_edit = QLineEdit()
         self.new_keyword_edit = QLineEdit()
-        keyword_layout.addWidget(QLabel("Ext:"))
+        keyword_layout.addWidget(QLabel("File type:"))
         keyword_layout.addWidget(self.key_ext_edit)
-        keyword_layout.addWidget(QLabel("Keyword:"))
+        keyword_layout.addWidget(QLabel("Find text:"))
         keyword_layout.addWidget(self.keyword_edit)
-        keyword_layout.addWidget(QLabel("New Keyword:"))
+        keyword_layout.addWidget(QLabel("Replace with:"))
         keyword_layout.addWidget(self.new_keyword_edit)
         keyword_layout.addStretch()
         self.stacked.addWidget(keyword_widget)
 
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress.setTextVisible(False)
+        self.progress.hide()
+        main_layout.addWidget(self.progress)
+        self.status_label = QLabel("Choose an operation and a source folder. Review changes before applying them.")
+        self.status_label.setWordWrap(True)
+        main_layout.addWidget(self.status_label)
+
         # Buttons: Preview, Run, Undo, Quit
         btn_layout = QHBoxLayout()
-        self.btn_preview = QPushButton("Preview")
-        self.btn_run = QPushButton("Run")
-        self.btn_undo = QPushButton("Undo")
+        self.btn_preview = QPushButton("Review changes")
+        self.btn_preview.setToolTip("Creates a log of proposed changes without changing any files.")
+        self.btn_run = QPushButton("Apply changes")
+        self.btn_run.setToolTip("Applies the reviewed operation to the selected folder.")
+        self.btn_undo = QPushButton("Undo last change")
+        self.btn_undo.setToolTip("Reverses changes made during this application session when possible.")
         self.btn_quit = QPushButton("Quit")
         btn_layout.addWidget(self.btn_preview)
         btn_layout.addWidget(self.btn_run)
@@ -171,6 +205,9 @@ class FileManagerWindow(QMainWindow):
         self.btn_undo.clicked.connect(self._on_undo)
         self.btn_quit.clicked.connect(self.close) # type: ignore
         self.scramble_check.toggled.connect(self.scramble_mult_spin.setEnabled)
+        self.source_edit.textChanged.connect(self._update_ready_status)
+        self.dest_edit.textChanged.connect(self._update_ready_status)
+        self._switch_operation(0)
 
     def _browse_source(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Source Folder")
@@ -184,6 +221,37 @@ class FileManagerWindow(QMainWindow):
 
     def _switch_operation(self, index):
         self.stacked.setCurrentIndex(index)
+        descriptions = [
+            ("Sort files into type-based folders. Use the destination folder only when categories should be created elsewhere.", "Choose a destination folder only when categories should be created outside the source folder."),
+            ("Rename matching files using a prefix and number. Use * as the file type to rename every file.", "Set the file type, prefix, starting number, and number of digits."),
+            ("Rename MP3 files from their track metadata, with a cleaned filename as a fallback.", "No additional settings are required."),
+            ("Find text in matching filenames and replace it. Leave Replace with empty to remove the text.", "Set a file type, the required text to find, and its replacement."),
+        ]
+        self.operation_help.setText(descriptions[index][0])
+        self.settings_help.setText(descriptions[index][1])
+        self._update_ready_status()
+
+    def _update_ready_status(self):
+        if not self.source_edit.text().strip():
+            self.status_label.setText("Select a source folder to enable a review or file operation.")
+        elif self.op_group.checkedId() == 0 and not self.dest_edit.text().strip():
+            self.status_label.setText("Ready to review. Sorting will create category folders inside the source folder.")
+        else:
+            self.status_label.setText("Ready to review. Review changes first; apply changes only when the plan is correct.")
+
+    def _set_working(self, message):
+        self.progress.setRange(0, 0)
+        self.progress.show()
+        self.status_label.setText(message)
+        for button in (self.btn_preview, self.btn_run, self.btn_undo, self.btn_quit):
+            button.setEnabled(False)
+        QApplication.processEvents()
+
+    def _finish_working(self, message):
+        self.progress.hide()
+        for button in (self.btn_preview, self.btn_run, self.btn_undo, self.btn_quit):
+            button.setEnabled(True)
+        self.status_label.setText(message)
 
     def _setup_logger(self):
         ensure_runtime_dir()
@@ -215,6 +283,7 @@ class FileManagerWindow(QMainWindow):
         dest = self._get_dest_path(source, self.dest_edit.text().strip())
 
         op = self.op_group.checkedId()
+        self._set_working("Reviewing the selected folder and preparing the change list…")
         handler = self._setup_logger()
         logging.info("=== PREVIEW OPERATION ===")
         try:
@@ -249,6 +318,7 @@ class FileManagerWindow(QMainWindow):
                 )
         finally:
             self._cleanup_logger(handler)
+            self._finish_working("Review complete. Open the log to inspect every proposed change before applying it.")
         QMessageBox.information(self, "Preview Complete", f"Logs written to '{LOG_FILE}'.")
 
     def _on_run(self):
@@ -259,6 +329,7 @@ class FileManagerWindow(QMainWindow):
         dest = self._get_dest_path(source, self.dest_edit.text().strip())
 
         op = self.op_group.checkedId()
+        self._set_working("Applying changes to the selected folder. Keep this window open until the operation is complete…")
         handler = self._setup_logger()
         logging.info("=== RUN OPERATION ===")
         try:
@@ -295,10 +366,12 @@ class FileManagerWindow(QMainWindow):
                 )
         finally:
             self._cleanup_logger(handler)
+            self._finish_working("Operation complete. Use Undo last change in this session if you need to reverse it.")
         QMessageBox.information(self, "Operation Complete", f"Logs written to '{LOG_FILE}'.")
 
     def _on_undo(self):
         op = self.op_group.checkedId()
+        self._set_working("Restoring the last operation…")
         handler = self._setup_logger()
         logging.info("=== UNDO OPERATION ===")
         success = True
@@ -316,8 +389,10 @@ class FileManagerWindow(QMainWindow):
         finally:
             self._cleanup_logger(handler)
         if success:
+            self._finish_working("Undo complete. The last operation was restored where possible.")
             QMessageBox.information(self, "Undo Complete", "All operations undone successfully.")
         else:
+            self._finish_working("Undo finished with errors. Review the log for files that could not be restored.")
             QMessageBox.critical(self, "Undo Failed", "Some operations failed. Check logs.")
 
     def _remove_empty_dirs(self, parent_dir: Path):
@@ -336,7 +411,7 @@ def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLE)
     window = FileManagerWindow()
-    window.resize(700, 300)
+    window.resize(880, 520)
     window.show()
     sys.exit(app.exec_())
 

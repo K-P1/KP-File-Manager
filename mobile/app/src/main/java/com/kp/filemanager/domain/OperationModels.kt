@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines platform-neutral file operation inputs and previews; created for mobile parity. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines platform-neutral file operation inputs and previews; last updated with explicit operation descriptions. */
 package com.kp.filemanager.domain
 
 data class AudioMetadata(
@@ -34,10 +34,10 @@ data class PlannedChange(
 }
 
 enum class OperationMode(val label: String, val supportingText: String) {
-    SORT("Sort", "Move items into tidy categories"),
-    MASS_RENAME("Batch", "Number many files consistently"),
-    MUSIC_RENAME("Music", "Use track, artist, and title tags"),
-    KEYWORD_RENAME("Replace", "Swap text inside filenames"),
+    SORT("Sort", "Move files into category folders"),
+    MASS_RENAME("Batch", "Rename files with a prefix and numbers"),
+    MUSIC_RENAME("Music", "Rename MP3s using available track metadata"),
+    KEYWORD_RENAME("Replace", "Find and replace text in filenames"),
 }
 
 data class OperationRequest(

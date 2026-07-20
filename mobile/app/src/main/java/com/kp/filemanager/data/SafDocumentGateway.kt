@@ -5,7 +5,9 @@ import android.content.ContentResolver
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.DocumentsContract
+import androidx.annotation.RequiresApi
 import androidx.documentfile.provider.DocumentFile
 import com.kp.filemanager.domain.AudioMetadata
 import com.kp.filemanager.domain.FileCandidate
@@ -101,6 +103,9 @@ class SafDocumentGateway(context: Context) : DocumentGateway {
 
     override fun undo(mutation: DocumentMutation): DocumentMutation {
         val current = document(mutation.currentUri)
+        if (mutation.currentParentUri == mutation.originalParentUri && current.name == mutation.originalName) {
+            return mutation
+        }
         val originalParent = document(mutation.originalParentUri)
         val restoredName = uniqueName(originalParent, mutation.originalName)
         val movedUri = if (mutation.currentParentUri == mutation.originalParentUri) {
@@ -119,17 +124,20 @@ class SafDocumentGateway(context: Context) : DocumentGateway {
 
     private fun tryNativeMove(source: Uri, sourceParent: Uri, targetParent: Uri, targetName: String): Uri? {
         val originalName = document(source.toString()).name
-        val renamedSource = if (originalName != targetName) rename(source, targetName) else source
+        if (originalName != targetName || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null
         return try {
-            DocumentsContract.moveDocument(resolver, renamedSource, sourceParent, targetParent)
+            nativeMove(source, sourceParent, targetParent)
         } catch (error: Exception) {
-            if (renamedSource != source && originalName != null) runCatching { rename(renamedSource, originalName) }
             when (error) {
                 is FileNotFoundException, is UnsupportedOperationException, is IllegalArgumentException -> null
                 else -> throw error
             }
         }
     }
+
+    @RequiresApi(Build.VERSION_CODES.N)
+    private fun nativeMove(source: Uri, sourceParent: Uri, targetParent: Uri): Uri? =
+        DocumentsContract.moveDocument(resolver, source, sourceParent, targetParent)
 
     private fun copyThenDelete(source: DocumentFile, targetParent: DocumentFile, targetName: String): Uri {
         val copied = copyDocument(source, targetParent, targetName)

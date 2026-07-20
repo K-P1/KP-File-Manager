@@ -10,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.random.Random
 
 sealed class DataError(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Storage(cause: Throwable) : DataError("The selected folder could not be accessed.", cause)
@@ -101,6 +102,7 @@ class DefaultFileOperationRepository(
                     zeroPadding = request.zeroPadding,
                     scramble = request.scramble,
                     scrambleMultiplier = request.scrambleMultiplier,
+                    random = Random(massRenameSeed(candidates.map { it.name }, request)),
                 )
                 OperationMode.MUSIC_RENAME -> planner.planMusicRename(candidates)
                 OperationMode.KEYWORD_RENAME -> planner.planKeywordRename(
@@ -123,8 +125,14 @@ class DefaultFileOperationRepository(
             Result.failure(DataError.Storage(error))
         } catch (error: IllegalArgumentException) {
             Result.failure(DataError.Storage(error))
+        } catch (error: Exception) {
+            Result.failure(DataError.Storage(error))
         }
     }
+
+    private fun massRenameSeed(names: List<String>, request: OperationRequest): Int = names
+        .sorted()
+        .fold(request.prefix.hashCode() * 31 + request.scrambleMultiplier) { seed, name -> seed * 31 + name.hashCode() }
 
     private fun safeReason(error: Exception): String = when (error) {
         is SecurityException -> "The folder provider denied this change"

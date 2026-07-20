@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerUiState.kt: Models durable screen inputs, progress, previews, and results; created for the mobile UI. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerUiState.kt: Models screen inputs, operation progress, previews, and results; last updated for visible progress text. */
 package com.kp.filemanager.ui
 
 import com.kp.filemanager.domain.OperationMode
@@ -20,6 +20,7 @@ data class FileManagerUiState(
     val keyword: String = "",
     val replacement: String = "",
     val isWorking: Boolean = false,
+    val progressText: String = "",
     val preview: List<PlannedChange> = emptyList(),
     val statusTitle: String? = null,
     val statusMessage: String? = null,

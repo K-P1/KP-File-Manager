@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerScreen.kt: Renders the accessible, adaptive single-screen file workflow; created for the mobile UI. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerScreen.kt: Renders the explicit, status-aware mobile file-operation workflow; last updated for self-guided use. */
 package com.kp.filemanager.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +19,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -45,7 +44,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -86,7 +84,7 @@ private fun FileManagerContent(
                 title = {
                     Column {
                         Text("KP File Manager", style = MaterialTheme.typography.titleLarge)
-                        Text("Private, local, and root-free", style = MaterialTheme.typography.labelMedium)
+                        Text("Sort and rename files", style = MaterialTheme.typography.labelMedium)
                     }
                 },
                 actions = {
@@ -100,6 +98,7 @@ private fun FileManagerContent(
         bottomBar = {
             ActionBar(
                 isWorking = uiState.isWorking,
+                progressText = uiState.progressText,
                 enabled = uiState.canRun,
                 onPreview = actions::preview,
                 onRun = actions::run,
@@ -112,7 +111,6 @@ private fun FileManagerContent(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp),
             ) {
-                item { HeroCard() }
                 if (uiState.statusTitle != null) {
                     item {
                         StatusCard(
@@ -138,23 +136,6 @@ private fun FileManagerContent(
                 }
                 item { Spacer(modifier = Modifier.height(16.dp)) }
             }
-        }
-    }
-}
-
-@Composable
-private fun HeroCard(modifier: Modifier = Modifier) {
-    ElevatedCard(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-    ) {
-        Column(modifier = Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("A calmer way to clean up files", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                "Choose a folder, review every proposed change, then run it on-device. Nothing is uploaded.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
         }
     }
 }
@@ -198,10 +179,11 @@ private fun FolderSection(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Folders", "Android’s system picker grants access only where you choose.")
+        SectionTitle("1. Select folders", "Choose the folder to process. Sorting can use a separate destination; otherwise it creates categories in the source folder.")
         FolderCard(
             label = "Source folder",
             folderName = uiState.sourceName.ifBlank { "No folder selected" },
+            folderLocation = uiState.sourceUri,
             buttonLabel = if (uiState.sourceUri == null) "Choose source" else "Change",
             onChoose = onPickSource,
         )
@@ -209,6 +191,7 @@ private fun FolderSection(
             FolderCard(
                 label = "Destination folder",
                 folderName = uiState.destinationName.ifBlank { "Same as source" },
+                folderLocation = uiState.destinationUri,
                 buttonLabel = if (uiState.destinationUri == null) "Choose another" else "Change",
                 onChoose = onPickDestination,
                 onClear = onClearDestination.takeIf { uiState.destinationUri != null },
@@ -221,6 +204,7 @@ private fun FolderSection(
 private fun FolderCard(
     label: String,
     folderName: String,
+    folderLocation: String?,
     buttonLabel: String,
     onChoose: () -> Unit,
     modifier: Modifier = Modifier,
@@ -242,6 +226,13 @@ private fun FolderCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(label, style = MaterialTheme.typography.labelLarge)
                 Text(folderName, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    folderLocation?.let { "Selected location: $it" } ?: "Select a folder to continue.",
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             if (onClear != null) TextButton(onClick = onClear) { Text("Reset") }
             OutlinedButton(onClick = onChoose) { Text(buttonLabel) }
@@ -256,7 +247,7 @@ private fun OperationPicker(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Choose a tool", "Each tool uses the source folder selected above.")
+        SectionTitle("2. Choose an operation", "Select one operation. Its settings appear below.")
         LazyRow(
             modifier = Modifier.fillMaxWidth().selectableGroup(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -293,7 +284,7 @@ private fun OperationSettings(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("${uiState.mode.label} settings", settingsDescription(uiState.mode))
+        SectionTitle("3. Set options for ${uiState.mode.label.lowercase()}", settingsDescription(uiState.mode))
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 when (uiState.mode) {
@@ -377,7 +368,7 @@ private fun KeywordSettings(uiState: FileManagerUiState, actions: FileManagerAct
         onValueChange = actions::setKeyword,
         modifier = Modifier.fillMaxWidth(),
         label = { Text("Find in filename") },
-        supportingText = if (uiState.keyword.isBlank()) ({ { Text("Required") } })() else null,
+        supportingText = if (uiState.keyword.isBlank()) ({ Text("Required") }) else null,
         isError = uiState.keyword.isBlank(),
         singleLine = true,
     )
@@ -440,7 +431,7 @@ private fun NumberStepper(
 @Composable
 private fun PreviewSection(changes: List<PlannedChange>, modifier: Modifier = Modifier) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("Review changes", "Showing ${minOf(changes.size, 30)} of ${changes.size} planned change(s).")
+        SectionTitle("4. Review changes", "Review this list before applying. Showing ${minOf(changes.size, 30)} of ${changes.size} planned change(s).")
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(vertical = 8.dp)) {
                 changes.take(30).forEachIndexed { index, change ->
@@ -472,6 +463,7 @@ private fun SectionTitle(title: String, supportingText: String, modifier: Modifi
 @Composable
 private fun ActionBar(
     isWorking: Boolean,
+    progressText: String,
     enabled: Boolean,
     onPreview: () -> Unit,
     onRun: () -> Unit,
@@ -479,21 +471,29 @@ private fun ActionBar(
 ) {
     Surface(modifier = modifier.fillMaxWidth(), tonalElevation = 3.dp) {
         Column {
-            if (isWorking) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (isWorking) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text(
+                    progressText,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
             ) {
-                OutlinedButton(onClick = onPreview, enabled = enabled, modifier = Modifier.weight(1f)) { Text("Preview") }
-                Button(onClick = onRun, enabled = enabled, modifier = Modifier.weight(1f)) { Text("Run changes") }
+                OutlinedButton(onClick = onPreview, enabled = enabled, modifier = Modifier.weight(1f)) { Text("Review changes") }
+                Button(onClick = onRun, enabled = enabled, modifier = Modifier.weight(1f)) { Text("Apply changes") }
             }
         }
     }
 }
 
 private fun settingsDescription(mode: OperationMode): String = when (mode) {
-    OperationMode.SORT -> "Choose standard categories or group matching series titles."
-    OperationMode.MASS_RENAME -> "Create predictable sequential or unique scrambled names."
-    OperationMode.MUSIC_RENAME -> "No extra setup is required."
-    OperationMode.KEYWORD_RENAME -> "Replace matching text while preserving each extension."
+    OperationMode.SORT -> "Files are moved into category folders. Turn on series mode to group matching titles instead."
+    OperationMode.MASS_RENAME -> "Set the file type and name pattern, then review the generated names."
+    OperationMode.MUSIC_RENAME -> "MP3 names are created from available track metadata; no settings are needed."
+    OperationMode.KEYWORD_RENAME -> "Find text in matching filenames and replace it, or leave the replacement blank to remove it."
 }
