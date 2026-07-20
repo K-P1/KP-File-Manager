@@ -1,0 +1,4 @@
+<!-- mobile/app/src/main/res/values/strings.xml: Stores user-facing app identity text; created for the mobile application. -->
+<resources>
+    <string name="app_name">KP File Manager</string>
+</resources>
