@@ -1,3 +1,5 @@
+"""desktop/src/kp_file_manager/utils.py: Reusable desktop helpers; relocated into the application package."""
+
 import functools
 import logging
 import time

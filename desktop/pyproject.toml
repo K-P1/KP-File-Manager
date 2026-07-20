@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kp-file-manager"
+version = "1.0.0"
+description = "Desktop file sorting and batch renaming utility"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "mutagen>=1.47,<2",
+    "PyQt5>=5.15,<6",
+]
+
+[project.scripts]
+kp-file-manager = "kp_file_manager.cli:main"
+kp-file-manager-gui = "kp_file_manager.gui_qt:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,10 +1,11 @@
-# main.py
+"""desktop/src/kp_file_manager/cli.py: Desktop command-line entry point; updated for package imports."""
+
 import argparse
 import logging
 import sys
 
-from sorter import FileSorter
-from renamer import Renamer
+from .renamer import Renamer
+from .sorter import FileSorter
 # from gui import main as run_gui  # If you want to launch the GUI from CLI
 
 def main():

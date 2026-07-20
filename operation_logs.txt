@@ -1,3 +1,0 @@
-2025-06-30 22:18:37,169 [INFO] === RUN OPERATION ===
-2025-06-30 22:18:37,171 [INFO] Sorting from C:\Users\hamed\Videos\series to C:\Users\hamed\Videos\series (dry_run=False)
-2025-06-30 22:18:37,247 [INFO] Sorting complete in 0.07 seconds.

@@ -1,4 +1,5 @@
-# renamer.py
+"""desktop/src/kp_file_manager/renamer.py: Desktop batch rename engine; packaged in the desktop module."""
+
 import os
 import logging
 import random
@@ -127,7 +128,8 @@ class Renamer:
             counter_str = str(counter).zfill(zero_padding)
         else:
             counter_str = str(counter)
-        return f"{prefix}{counter_str}.{extension}"
+        normalized_extension = extension.lstrip(".")
+        return f"{prefix}{counter_str}.{normalized_extension}"
 
     # --------------------------------------------------------------------------
     # 2) Music Name Simplification

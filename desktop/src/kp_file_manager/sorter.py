@@ -1,8 +1,9 @@
+"""desktop/src/kp_file_manager/sorter.py: Desktop sort engine; paths updated for the package layout."""
+
 import os
 import shutil
 import threading
 import re
-import psutil
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import json
@@ -10,8 +11,10 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from .paths import CONFIG_FILE
+
 class FileSorter:
-    def __init__(self, config_path: str = 'config.json'):
+    def __init__(self, config_path: str = str(CONFIG_FILE)):
         self.config_path = config_path
         self.sort_rules = self._load_config(config_path)
         self._history: List[Tuple[Path, Path]] = []
@@ -34,7 +37,7 @@ class FileSorter:
                 return json.load(f)
 
     def _has_enough_space(self, path: Path, required_bytes: int) -> bool:
-        usage = psutil.disk_usage(path.drive)
+        usage = shutil.disk_usage(path)
         return usage.free >= required_bytes
 
     def _extract_title(self, name: str) -> str:

@@ -1,11 +1,14 @@
+"""desktop/src/kp_file_manager/gui_tk.py: Legacy Tk desktop UI; retained with packaged imports and paths."""
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os
 import logging
 from pathlib import Path
 
-from sorter import FileSorter
-from renamer import Renamer
+from .paths import LOG_FILE, ensure_runtime_dir
+from .renamer import Renamer
+from .sorter import FileSorter
 
 class FileManagerGUI:
     """
@@ -19,7 +22,7 @@ class FileManagerGUI:
         self.renamer = Renamer()
 
         # Setup logging
-        self.log_file = "operation_logs.txt"
+        self.log_file = LOG_FILE
 
         # Shared input vars
         self.operation_var = tk.StringVar(value="sort")
@@ -121,6 +124,7 @@ class FileManagerGUI:
         if (d := filedialog.askdirectory()): self.dest_var.set(d)
 
     def _setup_file_logger(self):
+        ensure_runtime_dir()
         if os.path.exists(self.log_file): os.remove(self.log_file)
         handler = logging.FileHandler(self.log_file, mode='w', encoding='utf-8')
         handler.setLevel(logging.INFO)

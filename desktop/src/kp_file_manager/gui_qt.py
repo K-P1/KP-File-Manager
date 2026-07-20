@@ -1,3 +1,5 @@
+"""desktop/src/kp_file_manager/gui_qt.py: Primary PyQt desktop UI; updated for packaged paths."""
+
 import sys
 import os
 import logging
@@ -9,10 +11,10 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
-from sorter import FileSorter
-from renamer import Renamer
+from .paths import LOG_FILE, ensure_runtime_dir
+from .renamer import Renamer
+from .sorter import FileSorter
 
-LOG_FILE = "operation_logs.txt"
 
 DARK_STYLE = """
 QWidget {
@@ -184,6 +186,7 @@ class FileManagerWindow(QMainWindow):
         self.stacked.setCurrentIndex(index)
 
     def _setup_logger(self):
+        ensure_runtime_dir()
         if os.path.exists(LOG_FILE):
             os.remove(LOG_FILE)
         handler = logging.FileHandler(LOG_FILE, mode='w', encoding='utf-8')

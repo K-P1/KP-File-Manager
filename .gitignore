@@ -1,3 +1,10 @@
-operation_logs.txt
-preview_logs.txt
-_pycache_
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+desktop/runtime/*.txt
+desktop/build/
+desktop/*.egg-info/
+mobile/.gradle/
+mobile/local.properties
+mobile/**/build/
