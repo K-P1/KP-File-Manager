@@ -16,8 +16,6 @@
 - Checks: 6/6 Android planner tests passed; `lintDebug` passed with 0 errors (8 dependency/KTX advisories); `assembleDebug` produced an 11,694,622-byte APK; package inspection confirmed min SDK 23, target SDK 36, and no broad storage permission. Desktop checks also passed 3/3.
 - Attention: Android’s system picker and each document provider control which folders and mutation operations are available. Copy fallback can change timestamps when native move is unsupported. No emulator profile or physical device was connected, so on-device interaction remains the only skipped smoke check.
 
-## 2026-07-20 — Self-guided file operation UI
-
 ## 2026-07-21 - Android batch-rename recovery and performance
 
 - Changed: batch rename now renames each item directly, reserves collision-free target names from one folder listing, and recognizes interrupted `.kp_<uuid>_<extension>` temporary names as their original file type when planning a new batch operation.
