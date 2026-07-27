@@ -1,182 +1,396 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt: Produces deterministic, testable file-operation plans; last updated to recover interrupted batch-renames with their original extensions. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt: Produces deterministic media and filename-tool plans with centralized conflict detection; refactored for movie and TV organization. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
-import kotlin.random.Random
 
-class OperationPlanner(
-    private val categories: Map<String, Set<String>> = DEFAULT_CATEGORIES,
+class MediaOrganizationPlanner(
+    private val grouper: MediaGrouper = MediaGrouper(),
+    private val formatter: MediaPathFormatter = MediaPathFormatter(),
 ) {
-    fun planSort(candidates: List<FileCandidate>, seriesMode: Boolean): List<PlannedChange> {
-        if (seriesMode) {
-            return candidates
-                .groupBy { extractSeriesTitle(it.name) }
-                .filterKeys { it.isNotBlank() }
-                .filterValues { it.size > 1 }
-                .flatMap { (title, items) -> items.map { it.moveTo(title) } }
+    fun plan(
+        files: List<ScannedFile>,
+        destinationTreeUri: String,
+        existingDestinationPaths: Set<String>,
+        sourceAndDestinationAreSame: Boolean,
+        movieFolderName: String = "Movies",
+        tvFolderName: String = "TV Shows",
+        scanWarnings: List<ScanWarning> = emptyList(),
+    ): OperationPlan {
+        val grouping = grouper.group(files)
+        val operations = mutableListOf<PlannedFileOperation>()
+
+        grouping.groups.forEach { group ->
+            val duplicateVideoConflict = if (group.videos.size > 1) {
+                OperationConflict(
+                    ConflictType.DUPLICATE_VIDEO,
+                    "Multiple video files were detected for the same media item.",
+                )
+            } else {
+                null
+            }
+            group.files.forEach { groupedFile ->
+                val destinationPath = formatter.destinationPath(
+                    group = group,
+                    groupedFile = groupedFile,
+                    movieFolderName = movieFolderName,
+                    tvFolderName = tvFolderName,
+                )
+                val conflicts = listOfNotNull(duplicateVideoConflict)
+                operations += operationFor(
+                    file = groupedFile.file,
+                    destinationTreeUri = destinationTreeUri,
+                    destinationPath = destinationPath,
+                    reason = reasonFor(groupedFile.file.fileType),
+                    conflicts = conflicts,
+                    warnings = group.warnings + lowConfidenceWarning(group.mediaItem),
+                    sourceAndDestinationAreSame = sourceAndDestinationAreSame,
+                )
+            }
+        }
+        grouping.unmatched.forEach { unmatched ->
+            operations += skippedOperation(
+                file = unmatched.file,
+                destinationTreeUri = destinationTreeUri,
+                conflict = OperationConflict(
+                    ConflictType.UNKNOWN_MEDIA,
+                    "No reliable movie or TV identity could be determined.",
+                    blocking = false,
+                ),
+            )
+        }
+        grouping.ambiguous.forEach { (ambiguousFile, _) ->
+            operations += skippedOperation(
+                file = ambiguousFile.file,
+                destinationTreeUri = destinationTreeUri,
+                conflict = OperationConflict(
+                    ConflictType.AMBIGUOUS_MATCH,
+                    "This companion file has multiple equally plausible media matches.",
+                ),
+            )
         }
 
-        return candidates.map { candidate ->
-            val category = if (candidate.isDirectory) {
-                classifyFolder(candidate.descendantExtensions)
-            } else {
-                classifyExtension(extensionOf(candidate.name))
-            }
-            candidate.moveTo(category)
-        }
+        val withConflicts = ConflictDetector.detect(
+            operations = operations,
+            existingDestinationPaths = existingDestinationPaths,
+            sourceAndDestinationAreSame = sourceAndDestinationAreSame,
+        )
+        return OperationPlan(
+            destinationTreeUri = destinationTreeUri,
+            operations = withConflicts.sortedWith(compareBy({ it.destinationPath.lowercase(Locale.ROOT) }, { it.sourcePath })),
+            groups = grouping.groups,
+            scanWarnings = scanWarnings,
+            existingDestinationPaths = existingDestinationPaths,
+            sourceAndDestinationAreSame = sourceAndDestinationAreSame,
+        )
     }
 
-    @Suppress("LongParameterList")
-    fun planMassRename(
-        candidates: List<FileCandidate>,
-        extensionFilter: String,
-        prefix: String,
-        startIndex: Int,
-        zeroPadding: Int,
-        scramble: Boolean,
-        scrambleMultiplier: Int,
-        random: Random = Random.Default,
-    ): List<PlannedChange> {
-        val matches = matchingFiles(candidates, extensionFilter)
-        val numbers = if (scramble) {
-            val limit = matches.size * scrambleMultiplier.coerceIn(1, 10)
-            (1..limit).shuffled(random).take(matches.size)
+    private fun operationFor(
+        file: ScannedFile,
+        destinationTreeUri: String,
+        destinationPath: String,
+        reason: String,
+        conflicts: List<OperationConflict>,
+        warnings: List<String>,
+        sourceAndDestinationAreSame: Boolean,
+    ): PlannedFileOperation {
+        val newName = destinationPath.substringAfterLast('/')
+        val newParent = destinationPath.substringBeforeLast('/', "")
+        val sameParent = sourceAndDestinationAreSame && file.parentPath == newParent
+        val sameName = file.fileName == newName
+        val operationType = when {
+            sameParent && sameName -> OperationType.SKIP
+            sameParent -> OperationType.RENAME
+            sameName -> OperationType.MOVE
+            else -> OperationType.MOVE_AND_RENAME
+        }
+        val status = when {
+            operationType == OperationType.SKIP -> OperationStatus.UNCHANGED
+            conflicts.any(OperationConflict::blocking) -> OperationStatus.CONFLICT
+            else -> OperationStatus.READY
+        }
+        return PlannedFileOperation(
+            sourceUri = file.sourceUri,
+            sourceParentUri = file.parentUri,
+            sourcePath = file.sourcePath,
+            destinationTreeUri = destinationTreeUri,
+            destinationPath = destinationPath,
+            originalName = file.fileName,
+            newName = newName,
+            mediaType = file.fileType,
+            operationType = operationType,
+            reason = reason,
+            status = status,
+            conflicts = conflicts,
+            warnings = warnings,
+        )
+    }
+
+    private fun skippedOperation(
+        file: ScannedFile,
+        destinationTreeUri: String,
+        conflict: OperationConflict,
+    ) = PlannedFileOperation(
+        sourceUri = file.sourceUri,
+        sourceParentUri = file.parentUri,
+        sourcePath = file.sourcePath,
+        destinationTreeUri = destinationTreeUri,
+        destinationPath = file.sourcePath,
+        originalName = file.fileName,
+        newName = file.fileName,
+        mediaType = file.fileType,
+        operationType = OperationType.SKIP,
+        reason = "Skipped because a safe destination could not be determined.",
+        status = if (conflict.blocking) OperationStatus.CONFLICT else OperationStatus.SKIPPED,
+        conflicts = listOf(conflict),
+    )
+
+    private fun reasonFor(type: MediaFileType): String = when (type) {
+        MediaFileType.VIDEO -> "Normalize the detected media file."
+        MediaFileType.SUBTITLE -> "Keep the matched subtitle beside its video."
+        MediaFileType.ARTWORK -> "Keep recognized artwork with its movie."
+        MediaFileType.METADATA -> "Keep metadata with its movie."
+        MediaFileType.UNKNOWN -> "No operation."
+    }
+
+    private fun lowConfidenceWarning(item: MediaItem): List<String> =
+        if (item.confidence == Confidence.LOW) {
+            listOf("Low-confidence identity; review before applying.")
         } else {
-            (startIndex until startIndex + matches.size).toList()
+            emptyList()
         }
+}
 
-        return matches.zip(numbers).map { (candidate, number) ->
-            val padded = number.toString().padStart(zeroPadding.coerceAtLeast(0), '0')
-            candidate.renameTo(sanitizeFilename("$prefix$padded.${candidate.extension}"))
+class FileToolPlanner(
+    private val formatter: MediaPathFormatter = MediaPathFormatter(),
+) {
+    fun planBatchRename(
+        files: List<ScannedFile>,
+        request: BatchRenameRequest,
+        destinationTreeUri: String = files.firstOrNull()?.parentUri.orEmpty(),
+    ): List<PlannedFileOperation> {
+        val matches = matchingFiles(files, request.extensionFilter)
+        val operations = matches.mapIndexed { index, file ->
+            val number = (request.startingNumber + index)
+                .toString()
+                .padStart(request.digitPadding.coerceIn(0, 12), '0')
+            val extension = normalizedReplacementExtension(request.replacementExtension) ?: file.extension
+            val newName = formatter.sanitizeSegment("${request.prefix}$number${request.suffix}.${extension}")
+            renameOperation(file, newName, destinationTreeUri, "Apply the batch rename pattern.")
         }
+        return ConflictDetector.detect(
+            operations = operations,
+            existingDestinationPaths = files.mapTo(mutableSetOf(), ScannedFile::sourcePath),
+            sourceAndDestinationAreSame = true,
+        )
     }
 
-    fun planKeywordRename(
-        candidates: List<FileCandidate>,
-        extensionFilter: String,
-        keyword: String,
-        replacement: String,
-    ): List<PlannedChange> {
-        if (keyword.isEmpty()) return emptyList()
-        return matchingFiles(candidates, extensionFilter)
-            .filter { keyword in stemOf(it.name) }
-            .map { candidate ->
-                val newStem = stemOf(candidate.name).replace(keyword, replacement)
-                candidate.renameTo(sanitizeFilename("$newStem.${candidate.extension}"))
+    fun planFindAndReplace(
+        files: List<ScannedFile>,
+        request: FindAndReplaceRequest,
+        destinationTreeUri: String = files.firstOrNull()?.parentUri.orEmpty(),
+    ): List<PlannedFileOperation> {
+        if (request.findText.isEmpty()) return emptyList()
+        val operations = matchingFiles(files, request.extensionFilter)
+            .filter { request.findText in it.baseName }
+            .map { file ->
+                val newBaseName = file.baseName.replace(request.findText, request.replacementText)
+                val newName = formatter.sanitizeSegment("$newBaseName.${file.extension}")
+                renameOperation(file, newName, destinationTreeUri, "Replace matching filename text.")
             }
+        return ConflictDetector.detect(
+            operations = operations,
+            existingDestinationPaths = files.mapTo(mutableSetOf(), ScannedFile::sourcePath),
+            sourceAndDestinationAreSame = true,
+        )
     }
 
-    fun planMusicRename(candidates: List<FileCandidate>): List<PlannedChange> =
-        matchingFiles(candidates, "mp3").map { candidate ->
-            val metadata = candidate.metadata
-            val track = metadata.track
-                ?.substringBefore('/')
-                ?.trim()
-                ?.toIntOrNull()
-                ?.toString()
-                ?.padStart(2, '0')
-            val artist = metadata.artist?.trim().orEmpty()
-            val title = metadata.title?.trim().orEmpty()
-            val baseName = if (artist.isNotEmpty() && title.isNotEmpty()) {
-                listOfNotNull(track?.let { "$it." }, "$artist - $title").joinToString(" ")
-            } else {
-                cleanupStem(stemOf(candidate.name))
-            }
-            candidate.renameTo(sanitizeFilename("$baseName.mp3"))
-        }
-
-    fun extractSeriesTitle(name: String): String {
-        val withoutExtension = stemOf(name).lowercase(Locale.ROOT)
-        val normalized = withoutExtension
-            .replace(Regex("[\\[({].*?[\\])}]") , " ")
-            .replace(Regex("[\\[({].*"), " ")
-            .replace(Regex("[.\\\\/_-]+"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
-        return normalized
-            .split(' ')
-            .filterNot(::isNoiseToken)
-            .joinToString(" ") { token -> token.replaceFirstChar { it.titlecase(Locale.ROOT) } }
-            .trim()
-    }
-
-    private fun classifyFolder(extensions: List<String>): String {
-        if (extensions.isEmpty()) return "EmptyFolders"
-        val mostCommon = extensions
-            .map { it.lowercase(Locale.ROOT).trimStart('.') }
-            .groupingBy { it }
-            .eachCount()
-            .maxBy { it.value }
-            .key
-        return classifyExtension(mostCommon)
-    }
-
-    private fun classifyExtension(extension: String): String = categories.entries
-        .firstOrNull { extension.lowercase(Locale.ROOT) in it.value }
-        ?.key
-        ?: "Others"
-
-    private fun matchingFiles(candidates: List<FileCandidate>, extensionFilter: String): List<FileCandidate> {
-        val normalizedFilter = extensionFilter.trim().trimStart('.').lowercase(Locale.ROOT)
-        return candidates
-            .asSequence()
-            .filterNot(FileCandidate::isDirectory)
-            .filter { normalizedFilter.isBlank() || normalizedFilter == "*" || it.extension == normalizedFilter }
-            .sortedBy { it.name.lowercase(Locale.ROOT) }
+    private fun matchingFiles(files: List<ScannedFile>, extensionFilter: String): List<ScannedFile> {
+        val filter = extensionFilter.trim().trimStart('.').lowercase(Locale.ROOT)
+        return files.asSequence()
+            .filter { filter.isBlank() || filter == "*" || it.extension == filter }
+            .sortedWith(compareBy({ it.fileName.lowercase(Locale.ROOT) }, ScannedFile::sourcePath))
             .toList()
     }
 
-    private fun isNoiseToken(token: String): Boolean =
-        token.toIntOrNull() != null ||
-            token.matches(Regex("(19|20)\\d{2}")) ||
-            token.matches(Regex("s\\d{1,2}e\\d{1,2}")) ||
-            token.matches(Regex("[se]\\d{1,2}")) ||
-            token in SERIES_NOISE
+    private fun renameOperation(
+        file: ScannedFile,
+        newName: String,
+        destinationTreeUri: String,
+        reason: String,
+    ): PlannedFileOperation {
+        val destinationPath = listOf(file.parentPath, newName).filter(String::isNotBlank).joinToString("/")
+        val unchanged = file.fileName == newName
+        return PlannedFileOperation(
+            sourceUri = file.sourceUri,
+            sourceParentUri = file.parentUri,
+            sourcePath = file.sourcePath,
+            destinationTreeUri = destinationTreeUri,
+            destinationPath = destinationPath,
+            originalName = file.fileName,
+            newName = newName,
+            mediaType = file.fileType,
+            operationType = if (unchanged) OperationType.SKIP else OperationType.RENAME,
+            reason = reason,
+            status = if (unchanged) OperationStatus.UNCHANGED else OperationStatus.READY,
+        )
+    }
 
-    private fun cleanupStem(stem: String): String = stem.replace('_', ' ').replace(Regex("\\s+"), " ").trim()
+    private fun normalizedReplacementExtension(value: String?): String? = value
+        ?.trim()
+        ?.trimStart('.')
+        ?.lowercase(Locale.ROOT)
+        ?.takeIf(String::isNotBlank)
+}
 
-    private fun FileCandidate.moveTo(folder: String) = PlannedChange(
-        sourceUri = uri,
-        sourceParentUri = parentUri,
-        sourceName = name,
-        targetName = name,
-        destinationFolder = folder,
-        kind = ChangeKind.MOVE,
-    )
+object ConflictDetector {
+    fun detect(
+        operations: List<PlannedFileOperation>,
+        existingDestinationPaths: Set<String>,
+        sourceAndDestinationAreSame: Boolean,
+    ): List<PlannedFileOperation> {
+        val existingByCaseFolded = existingDestinationPaths.groupBy(::caseFold)
+        val duplicates = operations
+            .filter { it.operationType != OperationType.SKIP }
+            .groupBy { caseFold(it.destinationPath) }
+            .filterValues { it.size > 1 }
+            .keys
+        val duplicateVideoIdentities = operations
+            .filter { it.operationType != OperationType.SKIP && it.mediaType == MediaFileType.VIDEO }
+            .groupBy { caseFold(it.destinationPath.substringBeforeLast('.', it.destinationPath)) }
+            .filterValues { it.size > 1 }
+            .keys
 
-    private fun FileCandidate.renameTo(newName: String) = PlannedChange(
-        sourceUri = uri,
-        sourceParentUri = parentUri,
-        sourceName = name,
-        targetName = newName,
-        kind = ChangeKind.RENAME,
-    )
+        return operations.map { operation ->
+            if (operation.status in setOf(OperationStatus.SKIPPED, OperationStatus.UNCHANGED)) return@map operation
+            val conflicts = operation.conflicts.toMutableList()
+            val targetKey = caseFold(operation.destinationPath)
+            val sourceKey = caseFold(operation.sourcePath)
+            val videoIdentityKey = caseFold(
+                operation.destinationPath.substringBeforeLast('.', operation.destinationPath),
+            )
+            if (operation.mediaType == MediaFileType.VIDEO && videoIdentityKey in duplicateVideoIdentities) {
+                conflicts += OperationConflict(
+                    ConflictType.DUPLICATE_VIDEO,
+                    "Multiple video files were detected for the same media item.",
+                )
+            }
+            if (targetKey in duplicates) {
+                conflicts += OperationConflict(
+                    ConflictType.DUPLICATE_DESTINATION,
+                    "Multiple source files map to the same destination.",
+                )
+                if (operation.mediaType != MediaFileType.VIDEO) {
+                    conflicts += OperationConflict(
+                        ConflictType.DUPLICATE_COMPANION,
+                        "Multiple companion files map to the same normalized name.",
+                    )
+                }
+            }
+            val existingMatches = existingByCaseFolded[targetKey].orEmpty()
+            val targetIsOwnSource = sourceAndDestinationAreSame && targetKey == sourceKey
+            if (existingMatches.isNotEmpty() && !targetIsOwnSource) {
+                if (existingMatches.any { it != operation.destinationPath }) {
+                    conflicts += OperationConflict(
+                        ConflictType.CASE_ONLY_COLLISION,
+                        "The destination differs from an existing path only by letter case.",
+                    )
+                } else {
+                    conflicts += OperationConflict(
+                        ConflictType.DESTINATION_EXISTS,
+                        "A file already exists at the destination.",
+                    )
+                }
+            }
+            operation.copy(
+                status = if (conflicts.any(OperationConflict::blocking)) OperationStatus.CONFLICT else operation.status,
+                conflicts = conflicts.distinctBy { it.type to it.message },
+            )
+        }
+    }
 
-    private val FileCandidate.extension: String
-        get() = recoveryExtension ?: extensionOf(name)
+    private fun caseFold(path: String): String = path.replace('\\', '/').trim('/').lowercase(Locale.ROOT)
+}
 
-    companion object {
-        private val DEFAULT_CATEGORIES = mapOf(
-            "Images" to setOf("jpg", "jpeg", "png", "gif", "tiff", "bmp", "webp", "heic"),
-            "Documents" to setOf("pdf", "doc", "docx", "txt", "xls", "xlsx", "ppt", "pptx", "csv"),
-            "Audio" to setOf("mp3", "wav", "ogg", "flac", "m4a", "aac"),
-            "Video" to setOf("mp4", "mov", "avi", "mkv", "webm"),
-            "Archives" to setOf("zip", "rar", "7z", "tar", "gz"),
+class PlanConflictResolver(
+    private val formatter: MediaPathFormatter = MediaPathFormatter(),
+) {
+    fun skip(plan: OperationPlan, sourceUri: String): OperationPlan =
+        plan.copy(
+            operations = ConflictDetector.detect(
+                operations = plan.operations.map { operation ->
+                if (operation.sourceUri != sourceUri) {
+                    operation.copy(conflicts = operation.conflicts.filterNot { it.type in RENAMING_CONFLICTS })
+                } else {
+                    operation.copy(
+                        operationType = OperationType.SKIP,
+                        status = OperationStatus.SKIPPED,
+                        reason = "Skipped by the user during conflict review.",
+                        conflicts = emptyList(),
+                    )
+                }
+                },
+                existingDestinationPaths = plan.existingDestinationPaths,
+                sourceAndDestinationAreSame = plan.sourceAndDestinationAreSame,
+            ),
         )
 
-        private val SERIES_NOISE = setOf(
-            "season", "episode", "ep", "e", "s", "part", "complete", "final", "finale",
-            "brrip", "webrip", "hdrip", "bluray", "x264", "x265", "1080p", "720p", "2160p",
-            "web", "rip", "dvdrip", "cam", "hd", "uhd", "hdtv", "aac", "hevc", "ac3", "amzn",
-            "dl", "subs", "internal", "10bit", "esubs", "mp4", "mkv", "nf",
+    fun rename(
+        plan: OperationPlan,
+        sourceUri: String,
+        alternativeName: String,
+    ): OperationPlan {
+        require('/' !in alternativeName && '\\' !in alternativeName) {
+            "The alternative name must not contain path separators."
+        }
+        val safeName = formatter.sanitizeSegment(alternativeName)
+        val revised = plan.operations.map { operation ->
+            if (operation.sourceUri != sourceUri) return@map operation
+            val destinationDirectory = operation.destinationDirectoryPath
+            val destinationPath = listOf(destinationDirectory, safeName)
+                .filter(String::isNotBlank)
+                .joinToString("/")
+            val sourceDirectory = operation.sourcePath.substringBeforeLast('/', "")
+            val sameParent = plan.sourceAndDestinationAreSame && sourceDirectory == destinationDirectory
+            val sameName = operation.originalName == safeName
+            val operationType = when {
+                sameParent && sameName -> OperationType.SKIP
+                sameParent -> OperationType.RENAME
+                sameName -> OperationType.MOVE
+                else -> OperationType.MOVE_AND_RENAME
+            }
+            val remainingConflicts = operation.conflicts.filterNot {
+                it.type in RENAMING_CONFLICTS
+            }
+            operation.copy(
+                destinationPath = destinationPath,
+                newName = safeName,
+                operationType = operationType,
+                status = when {
+                    operationType == OperationType.SKIP -> OperationStatus.UNCHANGED
+                    remainingConflicts.any(OperationConflict::blocking) -> OperationStatus.CONFLICT
+                    else -> OperationStatus.READY
+                },
+                conflicts = remainingConflicts,
+                reason = "Use the alternative name selected during conflict review.",
+            )
+        }
+        return plan.copy(
+            operations = ConflictDetector.detect(
+                operations = revised,
+                existingDestinationPaths = plan.existingDestinationPaths,
+                sourceAndDestinationAreSame = plan.sourceAndDestinationAreSame,
+            ),
         )
+    }
 
-        private fun extensionOf(name: String): String = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-        private fun stemOf(name: String): String = name.substringBeforeLast('.', name)
-        private fun sanitizeFilename(name: String): String = name
-            .replace(Regex("[\\u0000-\\u001f\\u007f/:*?\"<>|]"), "_")
-            .trim()
-            .ifEmpty { "Untitled" }
+    private companion object {
+        val RENAMING_CONFLICTS = setOf(
+            ConflictType.DESTINATION_EXISTS,
+            ConflictType.DUPLICATE_DESTINATION,
+            ConflictType.DUPLICATE_COMPANION,
+            ConflictType.DUPLICATE_VIDEO,
+            ConflictType.CASE_ONLY_COLLISION,
+            ConflictType.INVALID_FILENAME,
+        )
     }
 }

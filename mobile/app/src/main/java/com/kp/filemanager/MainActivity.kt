@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/MainActivity.kt: Creates the Android repository and renders the Compose application; created for the mobile app. */
+/** mobile/app/src/main/java/com/kp/filemanager/MainActivity.kt: Creates the media-operation repository and renders the existing Compose application; wired to the refactored core. */
 package com.kp.filemanager
 
 import android.content.Intent
@@ -12,7 +12,6 @@ import androidx.activity.viewModels
 import com.kp.filemanager.data.DefaultFileOperationRepository
 import com.kp.filemanager.data.OperationLogStore
 import com.kp.filemanager.data.SafDocumentGateway
-import com.kp.filemanager.domain.OperationPlanner
 import com.kp.filemanager.ui.FileManagerScreen
 import com.kp.filemanager.ui.FileManagerViewModel
 import com.kp.filemanager.ui.theme.KpFileManagerTheme
@@ -21,7 +20,6 @@ class MainActivity : ComponentActivity() {
     private val repository by lazy {
         DefaultFileOperationRepository(
             gateway = SafDocumentGateway(this),
-            planner = OperationPlanner(),
             logStore = OperationLogStore(this),
         )
     }

@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerScreen.kt: Renders the explicit, status-aware mobile file-operation workflow; last updated for self-guided use. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerScreen.kt: Renders the existing mobile workflow against the refactored media core; logic wiring updated without a visual redesign. */
 package com.kp.filemanager.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +30,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -84,7 +83,7 @@ private fun FileManagerContent(
                 title = {
                     Column {
                         Text("KP File Manager", style = MaterialTheme.typography.titleLarge)
-                        Text("Sort and rename files", style = MaterialTheme.typography.labelMedium)
+                        Text("Organize movies and TV", style = MaterialTheme.typography.labelMedium)
                     }
                 },
                 actions = {
@@ -99,7 +98,8 @@ private fun FileManagerContent(
             ActionBar(
                 isWorking = uiState.isWorking,
                 progressText = uiState.progressText,
-                enabled = uiState.canRun,
+                previewEnabled = uiState.canPreview,
+                applyEnabled = uiState.canApply,
                 onPreview = actions::preview,
                 onRun = actions::run,
             )
@@ -179,7 +179,7 @@ private fun FolderSection(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionTitle("1. Select folders", "Choose the folder to process. Sorting can use a separate destination; otherwise it creates categories in the source folder.")
+        SectionTitle("1. Select folders", "Choose the media folder to scan. Organization can use a separate destination.")
         FolderCard(
             label = "Source folder",
             folderName = uiState.sourceName.ifBlank { "No folder selected" },
@@ -187,7 +187,7 @@ private fun FolderSection(
             buttonLabel = if (uiState.sourceUri == null) "Choose source" else "Change",
             onChoose = onPickSource,
         )
-        if (uiState.mode == OperationMode.SORT) {
+        if (uiState.mode == OperationMode.ORGANIZE_MEDIA) {
             FolderCard(
                 label = "Destination folder",
                 folderName = uiState.destinationName.ifBlank { "Same as source" },
@@ -288,18 +288,19 @@ private fun OperationSettings(
         ElevatedCard(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 when (uiState.mode) {
-                    OperationMode.SORT -> ToggleRow(
-                        title = "Series mode",
-                        supportingText = "Group files that share a normalized show title.",
-                        checked = uiState.seriesMode,
-                        onCheckedChange = actions::setSeriesMode,
-                    )
-                    OperationMode.MASS_RENAME -> MassRenameSettings(uiState, actions)
-                    OperationMode.MUSIC_RENAME -> Text(
-                        "MP3 files use embedded track, artist, and title tags. Files without complete tags receive a cleaned-up filename.",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    OperationMode.KEYWORD_RENAME -> KeywordSettings(uiState, actions)
+                    OperationMode.ORGANIZE_MEDIA -> {
+                        NumberStepper(
+                            label = "Maximum scan depth",
+                            value = uiState.maximumScanDepth,
+                            onValueChange = actions::setMaximumScanDepth,
+                        )
+                        Text(
+                            "Movies will use “${uiState.movieFolderName}”; TV episodes will use “${uiState.tvFolderName}”.",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                    OperationMode.BATCH_RENAME -> MassRenameSettings(uiState, actions)
+                    OperationMode.FIND_AND_REPLACE -> KeywordSettings(uiState, actions)
                 }
             }
         }
@@ -337,20 +338,6 @@ private fun MassRenameSettings(uiState: FileManagerUiState, actions: FileManager
             modifier = Modifier.weight(1f),
         )
     }
-    HorizontalDivider()
-    ToggleRow(
-        title = "Scramble numbers",
-        supportingText = "Assign unique random values instead of a sequence.",
-        checked = uiState.scramble,
-        onCheckedChange = actions::setScramble,
-    )
-    if (uiState.scramble) {
-        NumberStepper(
-            label = "Scramble range multiplier",
-            value = uiState.scrambleMultiplier,
-            onValueChange = actions::setScrambleMultiplier,
-        )
-    }
 }
 
 @Composable
@@ -380,27 +367,6 @@ private fun KeywordSettings(uiState: FileManagerUiState, actions: FileManagerAct
         supportingText = { Text("Leave blank to remove the matching text") },
         singleLine = true,
     )
-}
-
-@Composable
-private fun ToggleRow(
-    title: String,
-    supportingText: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(supportingText, style = MaterialTheme.typography.bodySmall)
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
 }
 
 @Composable
@@ -464,7 +430,8 @@ private fun SectionTitle(title: String, supportingText: String, modifier: Modifi
 private fun ActionBar(
     isWorking: Boolean,
     progressText: String,
-    enabled: Boolean,
+    previewEnabled: Boolean,
+    applyEnabled: Boolean,
     onPreview: () -> Unit,
     onRun: () -> Unit,
     modifier: Modifier = Modifier,
@@ -484,16 +451,15 @@ private fun ActionBar(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
             ) {
-                OutlinedButton(onClick = onPreview, enabled = enabled, modifier = Modifier.weight(1f)) { Text("Review changes") }
-                Button(onClick = onRun, enabled = enabled, modifier = Modifier.weight(1f)) { Text("Apply changes") }
+                OutlinedButton(onClick = onPreview, enabled = previewEnabled, modifier = Modifier.weight(1f)) { Text("Review changes") }
+                Button(onClick = onRun, enabled = applyEnabled, modifier = Modifier.weight(1f)) { Text("Apply changes") }
             }
         }
     }
 }
 
 private fun settingsDescription(mode: OperationMode): String = when (mode) {
-    OperationMode.SORT -> "Files are moved into category folders. Turn on series mode to group matching titles instead."
-    OperationMode.MASS_RENAME -> "Set the file type and name pattern, then review the generated names."
-    OperationMode.MUSIC_RENAME -> "MP3 names are created from available track metadata; no settings are needed."
-    OperationMode.KEYWORD_RENAME -> "Find text in matching filenames and replace it, or leave the replacement blank to remove it."
+    OperationMode.ORGANIZE_MEDIA -> "Recursively scan for movies, TV episodes, subtitles, artwork, and metadata."
+    OperationMode.BATCH_RENAME -> "Set the file type and name pattern, then review the generated names."
+    OperationMode.FIND_AND_REPLACE -> "Find text in matching filenames and replace it, or leave the replacement blank to remove it."
 }

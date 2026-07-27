@@ -18,16 +18,18 @@ run_checks.bat
 
 The debug APK is produced at `app/build/outputs/apk/debug/app-debug.apk`.
 
-## Use
+## Core workflow
 
 1. Choose a source folder using Android’s system picker.
-2. Select Sort, Batch, Music, or Replace.
-3. Configure the visible options.
-4. Tap Preview and review the proposed changes.
-5. Tap Run changes.
-6. Use Undo before closing the app if you need to restore the last completed operation.
+2. Select Organize, Batch Rename, or Find & Replace.
+3. Configure the scan or filename options.
+4. Generate and review the complete plan.
+5. Apply the retained plan only after conflicts are resolved.
+6. Use Undo before closing the app to restore successful changes.
 
-The destination defaults to the source folder for sorting. Folder grants are persisted by Android, while undo history intentionally remains session-only to match the desktop app.
+Media organization recursively scans to a configurable depth (default 4), detects movies, TV episodes, subtitles, artwork, and NFO metadata, then proposes normalized `Movies/` and `TV Shows/` paths. Scanning and preview never mutate files. Folder grants are persisted by Android, while undo history intentionally remains in memory for the current app session.
+
+Batch Rename and Find & Replace use the same preview, conflict detection, overwrite protection, execution, and undo infrastructure. Generic category sorting and MP3/music cleanup are no longer part of the Android application.
 
 ## Storage limitations
 
