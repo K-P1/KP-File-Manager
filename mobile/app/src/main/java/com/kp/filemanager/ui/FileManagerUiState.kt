@@ -22,6 +22,12 @@ enum class OrganizerWorkflowState {
     UNDO_COMPLETE,
 }
 
+data class OrganizationDefaults(
+    val maximumScanDepth: Int = 4,
+    val movieFolderName: String = "Movies",
+    val tvFolderName: String = "TV Shows",
+)
+
 data class FileManagerUiState(
     val mode: OperationMode = OperationMode.ORGANIZE_MEDIA,
     val sourceUri: String? = null,
@@ -48,6 +54,7 @@ data class FileManagerUiState(
     val statusMessage: String? = null,
     val failures: List<String> = emptyList(),
     val canUndo: Boolean = false,
+    val hasManualReviewChanges: Boolean = false,
 ) {
     val preview: List<PlannedFileOperation>
         get() = activePlan?.operations.orEmpty()
@@ -55,6 +62,8 @@ data class FileManagerUiState(
     val canPreview: Boolean
         get() = sourceUri != null &&
             !isWorking &&
+            (mode != OperationMode.ORGANIZE_MEDIA ||
+                (movieFolderName.isNotBlank() && tvFolderName.isNotBlank())) &&
             (mode != OperationMode.FIND_AND_REPLACE || keyword.isNotBlank())
 
     val canApply: Boolean

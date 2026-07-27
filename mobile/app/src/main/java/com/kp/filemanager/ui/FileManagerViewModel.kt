@@ -23,8 +23,12 @@ interface FileManagerActions {
     fun selectDestination(uri: String)
     fun clearDestination()
     fun setMaximumScanDepth(value: Int)
+    fun setMovieFolderName(value: String)
+    fun setTvFolderName(value: String)
     fun setExtensionFilter(value: String)
     fun setPrefix(value: String)
+    fun setSuffix(value: String)
+    fun setReplacementExtension(value: String)
     fun setStartIndex(value: Int)
     fun setZeroPadding(value: Int)
     fun setKeyword(value: String)
@@ -35,18 +39,32 @@ interface FileManagerActions {
     fun renameConflict(sourceUri: String, alternativeName: String)
     fun run()
     fun undo()
+    fun done()
+    fun discardPreview()
     fun dismissStatus()
 }
 
 class FileManagerViewModel(
     private val repository: FileOperationRepository,
     private val conflictResolver: PlanConflictResolver = PlanConflictResolver(),
+    organizationDefaults: OrganizationDefaults = OrganizationDefaults(),
+    private val onOrganizationDefaultsChanged: (OrganizationDefaults) -> Unit = {},
 ) : ViewModel(), FileManagerActions {
-    private val _uiState = MutableStateFlow(FileManagerUiState())
+    private val _uiState = MutableStateFlow(
+        FileManagerUiState(
+            maximumScanDepth = organizationDefaults.maximumScanDepth.coerceIn(0, 20),
+            movieFolderName = organizationDefaults.movieFolderName.ifBlank { "Movies" },
+            tvFolderName = organizationDefaults.tvFolderName.ifBlank { "TV Shows" },
+        ),
+    )
     val uiState: StateFlow<FileManagerUiState> = _uiState.asStateFlow()
     private var previewJob: Job? = null
+    private var lastProgressUpdateNanos = 0L
 
-    override fun selectMode(mode: OperationMode) = invalidatePlan { copy(mode = mode) }
+    override fun selectMode(mode: OperationMode) {
+        if (_uiState.value.mode == mode) return
+        invalidatePlan { copy(mode = mode) }
+    }
 
     override fun selectSource(uri: String) {
         val name = runCatching { repository.folderName(uri) }.getOrDefault("Selected folder")
@@ -65,9 +83,25 @@ class FileManagerViewModel(
     }
 
     override fun clearDestination() = invalidatePlan { copy(destinationUri = null, destinationName = "") }
-    override fun setMaximumScanDepth(value: Int) = invalidatePlan { copy(maximumScanDepth = value.coerceIn(0, 20)) }
+    override fun setMaximumScanDepth(value: Int) {
+        invalidatePlan { copy(maximumScanDepth = value.coerceIn(0, 20)) }
+        persistOrganizationDefaults()
+    }
+
+    override fun setMovieFolderName(value: String) {
+        invalidatePlan { copy(movieFolderName = value) }
+        persistOrganizationDefaults()
+    }
+
+    override fun setTvFolderName(value: String) {
+        invalidatePlan { copy(tvFolderName = value) }
+        persistOrganizationDefaults()
+    }
     override fun setExtensionFilter(value: String) = invalidatePlan { copy(extensionFilter = value) }
     override fun setPrefix(value: String) = invalidatePlan { copy(prefix = value) }
+    override fun setSuffix(value: String) = invalidatePlan { copy(suffix = value) }
+    override fun setReplacementExtension(value: String) =
+        invalidatePlan { copy(replacementExtension = value) }
     override fun setStartIndex(value: Int) = invalidatePlan { copy(startIndex = value.coerceAtLeast(1)) }
     override fun setZeroPadding(value: Int) = invalidatePlan { copy(zeroPadding = value.coerceIn(0, 12)) }
     override fun setKeyword(value: String) = invalidatePlan { copy(keyword = value) }
@@ -96,15 +130,20 @@ class FileManagerViewModel(
                     statusTitle = null,
                     statusMessage = null,
                     failures = emptyList(),
+                    hasManualReviewChanges = false,
                 )
             }
             try {
                 repository.preview(request) { progress ->
-                    mutate {
-                        copy(
-                            scanProgress = progress,
-                            progressText = "Scanned ${progress.filesScanned} file(s): ${progress.currentPath}",
-                        )
+                    val now = System.nanoTime()
+                    if (progress.filesScanned <= 1 || now - lastProgressUpdateNanos >= PROGRESS_UPDATE_INTERVAL_NANOS) {
+                        lastProgressUpdateNanos = now
+                        mutate {
+                            copy(
+                                scanProgress = progress,
+                                progressText = "Scanned ${progress.filesScanned} file(s): ${progress.currentPath}",
+                            )
+                        }
                     }
                 }.fold(
                     onSuccess = { outcome ->
@@ -162,6 +201,7 @@ class FileManagerViewModel(
                 activePlan = null,
                 statusTitle = "Scan canceled",
                 statusMessage = "Files were not changed.",
+                hasManualReviewChanges = false,
             )
         }
     }
@@ -193,6 +233,7 @@ class FileManagerViewModel(
                     statusTitle = null,
                     statusMessage = null,
                     failures = emptyList(),
+                    hasManualReviewChanges = false,
                 )
             }
             repository.execute(plan).fold(
@@ -255,6 +296,38 @@ class FileManagerViewModel(
         }
     }
 
+    override fun done() = mutate {
+        copy(
+            workflowState = if (sourceUri == null) {
+                OrganizerWorkflowState.IDLE
+            } else {
+                OrganizerWorkflowState.FOLDER_SELECTED
+            },
+            activePlan = null,
+            progressText = "",
+            statusTitle = null,
+            statusMessage = null,
+            failures = emptyList(),
+            hasManualReviewChanges = false,
+        )
+    }
+
+    override fun discardPreview() = mutate {
+        copy(
+            workflowState = if (sourceUri == null) {
+                OrganizerWorkflowState.IDLE
+            } else {
+                OrganizerWorkflowState.FOLDER_SELECTED
+            },
+            activePlan = null,
+            progressText = "",
+            statusTitle = null,
+            statusMessage = null,
+            failures = emptyList(),
+            hasManualReviewChanges = false,
+        )
+    }
+
     override fun dismissStatus() = mutate { copy(statusTitle = null, statusMessage = null, failures = emptyList()) }
 
     private fun showFailure(error: Throwable, workflowState: OrganizerWorkflowState) = mutate {
@@ -286,11 +359,18 @@ class FileManagerViewModel(
 
     private inline fun invalidatePlan(transform: FileManagerUiState.() -> FileManagerUiState) {
         mutate {
-            transform().copy(
+            val transformed = transform()
+            transformed.copy(
                 activePlan = null,
                 statusTitle = null,
                 statusMessage = null,
                 failures = emptyList(),
+                workflowState = if (transformed.sourceUri == null) {
+                    OrganizerWorkflowState.IDLE
+                } else {
+                    OrganizerWorkflowState.FOLDER_SELECTED
+                },
+                hasManualReviewChanges = false,
             )
         }
     }
@@ -308,6 +388,7 @@ class FileManagerViewModel(
                 },
                 statusTitle = null,
                 statusMessage = null,
+                hasManualReviewChanges = true,
             )
         }
     }
@@ -316,10 +397,31 @@ class FileManagerViewModel(
         _uiState.update(transform)
     }
 
+    private fun persistOrganizationDefaults() {
+        val state = _uiState.value
+        onOrganizationDefaultsChanged(
+            OrganizationDefaults(
+                maximumScanDepth = state.maximumScanDepth,
+                movieFolderName = state.movieFolderName,
+                tvFolderName = state.tvFolderName,
+            ),
+        )
+    }
+
     class Factory(
         private val repository: FileOperationRepository,
+        private val organizationDefaults: OrganizationDefaults = OrganizationDefaults(),
+        private val onOrganizationDefaultsChanged: (OrganizationDefaults) -> Unit = {},
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = FileManagerViewModel(repository) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = FileManagerViewModel(
+            repository = repository,
+            organizationDefaults = organizationDefaults,
+            onOrganizationDefaultsChanged = onOrganizationDefaultsChanged,
+        ) as T
+    }
+
+    private companion object {
+        const val PROGRESS_UPDATE_INTERVAL_NANOS = 100_000_000L
     }
 }

@@ -20,7 +20,7 @@ Status values: `Pending`, `In progress`, `Complete`, `Deferred`.
 | Connect core workflow state to the existing application layer | Complete | Added explicit workflow states, real scan progress/cancellation, retained immutable plans, input invalidation, conflict skip/rename resolution, no-media/warning states, and apply gating. Existing Compose layout was only minimally rewired; no styling or layout redesign was performed. |
 | Add comprehensive automated tests | Complete | 27 unit tests pass across parser, scanner, matching, formatting, planning, conflict resolution, idempotency, retained tools, execution, partial failure, and undo. |
 | Run Android verification | Complete | `mobile/run_checks.bat` passes unit tests, Android lint, and debug APK assembly. |
-| UI/UX redesign from `docs/UI.md` | Deferred | Separate future phase after all core logic is complete and verified. No styling, layout, navigation, animation, or visual refinement changes in this pass. |
+| UI/UX redesign from `docs/UI.md` | Complete | Implemented the Android design foundation, adaptive phone/tablet navigation, full organizer state flow, review search/tabs/filters/sort, safe confirmation/conflict/undo flows, inline file-tool previews, settings, semantic states, and verified light/dark theming. |
 
 ## Implementation Log
 
@@ -48,3 +48,22 @@ Status values: `Pending`, `In progress`, `Complete`, `Deferred`.
 - Files: `mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt`, `OperationModels.kt`, `mobile/app/src/main/java/com/kp/filemanager/data/`, `mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt`, tests, `README.md`, and `mobile/README.md`.
 - Checks: 27/27 unit tests passed; Android lint passed; debug assembly passed; `mobile/run_checks.bat` completed successfully; `git diff --check` reported no whitespace errors.
 - Attention: no emulator or physical Android device was connected, so real-provider SAF behavior remains the only skipped verification. UI redesign, styling, responsive layout, navigation, animation, and accessibility presentation remain intentionally deferred.
+
+### 2026-07-27 — UI phase foundation and primary workflows
+
+- Changed: replaced the single form screen with an adaptive application shell (phone bottom navigation, tablet rail, expanded sidebar), distinct Organize/Batch Rename/Find & Replace/Settings destinations, explicit organizer setup/scanning/review/apply/results/undo screens, scan options and operation-detail sheets, conflict/apply/cancel/undo confirmation flows, inline tool previews, shared status/progress/empty/error components, semantic light/dark surfaces, and immediate persisted theme selection.
+- Why: implement the guided select → scan → review → apply → done/undo workflow from `docs/UI.md` while keeping scan and filesystem behavior inside the verified ViewModel/repository boundary.
+- Files: `mobile/app/src/main/java/com/kp/filemanager/ui/`, `mobile/app/src/main/java/com/kp/filemanager/MainActivity.kt`, `mobile/app/build.gradle.kts`, `mobile/app/src/test/java/com/kp/filemanager/ui/FileManagerPresentationTest.kt`, and this tracker.
+- Checks: presentation-summary tests were written red-first and now pass; `compileDebugKotlin` passes with the Android Studio JBR and local Android SDK.
+- Decision: Batch Rename and Find & Replace require an explicit preview refresh after field changes because the current repository rescans the SAF folder for every preview; automatically rescanning on every keystroke would create provider churn and a visibly unstable form. The preview remains inline and the apply action is unavailable until it is current.
+- Attention: the final Compose lint/build pass, screen-size audit, and emulator/device interaction review are still pending. The Material icon dependency was added to provide consistent accessible navigation and status symbols without maintaining a parallel custom vector set.
+
+### 2026-07-27 — UI completion, responsive audit, and device smoke test
+
+- Changed: completed media/status review tabs, search, advanced operation/status/confidence filters, sorting, manual-review navigation protection, progress update throttling, confirmed undo paths, persisted organization defaults, keyboard resize behavior, and app-selected dark-theme system-bar contrast.
+- Why: close the remaining usability and accessibility gaps found during the final comparison with `docs/UI.md` and prevent stale or manually edited plans from being discarded silently.
+- Files: `mobile/app/src/main/AndroidManifest.xml`, `mobile/app/src/main/java/com/kp/filemanager/MainActivity.kt`, `mobile/app/src/main/java/com/kp/filemanager/ui/`, UI presentation tests, `mobile/run_checks.bat`, and this tracker.
+- Checks: 34/34 unit tests passed; Android lint passed with 0 errors (14 pre-existing version/KTX advisories); debug APK assembly passed; `git diff --check` passed. A headless API 28 emulator verified compact bottom navigation, expanded sidebar layout, safe-area placement, real SAF folder selection, selected-folder rendering, empty-scan handling, landscape sheet scrolling, IME resizing, and immediate light/dark switching.
+- Decision: apply/undo progress remains indeterminate because the verified executor exposes only a final result and no trustworthy per-operation callback; the UI deliberately avoids fake percentages and remains responsive while work runs.
+- Decision: the local check helper prefers Android Studio's bundled JBR when present so an unrelated global JDK version cannot prevent Gradle from starting; environments without Android Studio retain their configured `JAVA_HOME`.
+- Attention: native file mutation behavior still needs a physical-device pass across the document providers intended for release, as provider capabilities vary. The UI and state integration did not alter the executor or filesystem safety rules.
