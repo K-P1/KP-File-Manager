@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/EmptyDirectoryCleaner.kt: Deletes indexed source directories bottom-up only after successful relocation while preserving protected roots and destinations; added for safe cleanup. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/EmptyDirectoryCleaner.kt: Deletes every verified-empty indexed source directory bottom-up while preserving roots and destinations; last changed to clean safely after partial relocation. */
 package com.kp.filemanager.domain
 
 import java.io.IOException
@@ -16,16 +16,8 @@ class EmptyDirectoryCleaner(
         index: MediaIndex,
         selectedRootUri: String,
         protectedDirectoryUris: Set<String>,
-        relocationFailures: Int,
         onProcessed: (IndexedDirectory, Boolean) -> Unit = { _, _ -> },
     ): CleanupResult {
-        if (relocationFailures > 0) {
-            return CleanupResult(
-                skipped = true,
-                failures = listOf("Empty-folder cleanup was skipped because one or more files could not be relocated."),
-            )
-        }
-
         var deleted = 0
         val failures = mutableListOf<String>()
         index.directories
@@ -34,7 +26,7 @@ class EmptyDirectoryCleaner(
             .sortedWith(compareByDescending<IndexedDirectory> { it.depth }.thenByDescending { it.path })
             .forEach { directory ->
                 try {
-                    val wasDeleted = gateway.deleteDirectoryIfEmpty(directory.uri)
+                    val wasDeleted = gateway.deleteDirectoryIfEmpty(directory.uri, directory.parentUri)
                     if (wasDeleted) {
                         deleted += 1
                     }

@@ -1,10 +1,11 @@
-/** mobile/app/src/test/java/com/kp/filemanager/domain/EmptyDirectoryCleanerTest.kt: Verifies bottom-up empty-folder cleanup exclusions and failure gating; added for media workflow optimization. */
+/** mobile/app/src/test/java/com/kp/filemanager/domain/EmptyDirectoryCleanerTest.kt: Verifies exhaustive bottom-up cleanup and exclusions; last changed to cover parent-aware ancestor deletion. */
 package com.kp.filemanager.domain
 
 import com.kp.filemanager.data.DocumentMutation
 import com.kp.filemanager.data.DocumentMutationGateway
 import com.kp.filemanager.data.PreparedDirectory
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,7 +28,6 @@ class EmptyDirectoryCleanerTest {
             index = index,
             selectedRootUri = "root",
             protectedDirectoryUris = setOf("destination"),
-            relocationFailures = 0,
         )
 
         assertEquals(listOf("child", "parent", "non-empty"), gateway.deleteAttempts)
@@ -36,7 +36,7 @@ class EmptyDirectoryCleanerTest {
     }
 
     @Test
-    fun `cleanup is skipped after any relocation failure`() {
+    fun `cleanup always removes verified empty directories when invoked`() {
         val gateway = CleanerGateway()
         val index = MediaIndex(
             root = DocumentEntry("root", "", "Downloads", true, 0),
@@ -48,16 +48,20 @@ class EmptyDirectoryCleanerTest {
             index = index,
             selectedRootUri = "root",
             protectedDirectoryUris = emptySet(),
-            relocationFailures = 1,
         )
 
-        assertTrue(result.skipped)
-        assertTrue(gateway.deleteAttempts.isEmpty())
+        assertFalse(result.skipped)
+        assertEquals(listOf("child"), gateway.deleteAttempts)
+        assertEquals(listOf("child"), gateway.deletedDirectories)
     }
 
     private class CleanerGateway : DocumentMutationGateway {
         val deleteAttempts = mutableListOf<String>()
         val deletedDirectories = mutableListOf<String>()
+        private val children = mutableMapOf(
+            "parent" to mutableSetOf("child"),
+            "non-empty" to mutableSetOf("unrelated-file"),
+        )
 
         override fun documentExists(uri: String) = true
         override fun documentExistsInParent(uri: String, parentUri: String) = true
@@ -66,10 +70,11 @@ class EmptyDirectoryCleanerTest {
         override fun apply(operation: PlannedFileOperation, targetParentUri: String): DocumentMutation =
             error("Not used")
         override fun undo(mutation: DocumentMutation) = Unit
-        override fun deleteDirectoryIfEmpty(uri: String): Boolean {
+        override fun deleteDirectoryIfEmpty(uri: String, parentUri: String?): Boolean {
             deleteAttempts += uri
-            if (uri == "non-empty") return false
+            if (children[uri].orEmpty().isNotEmpty()) return false
             deletedDirectories += uri
+            parentUri?.let { children[it]?.remove(uri) }
             return true
         }
     }

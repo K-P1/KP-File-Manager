@@ -39,3 +39,11 @@
 - Files: Android domain/data pipeline, organizer ViewModel/state/Compose progress UI, focused regression tests, and `docs/implementation_tracker.md`.
 - Checks: 46/46 unit tests passed; `mobile/run_checks.bat` passed lint and debug assembly; `git diff --check` passed.
 - Attention: real provider move/rename behavior still needs a physical-device matrix; unsupported authority capabilities are cached and use the verified fallback.
+
+## 2026-07-28 - Exhaustive Android empty-folder cleanup
+
+- Changed: cleanup now removes verified-empty indexed source folders even after individual relocation failures, refreshes SAF parent listings after every child deletion, and treats provider cleanup failures as an incomplete operation.
+- Why: prevent stale directory caches and all-or-nothing cleanup gating from leaving old empty ancestor folders behind while reporting sorting complete.
+- Files: Android cleanup gateway/cleaner/executor/result/UI state, cleanup regression tests, and `docs/implementation_tracker.md`.
+- Checks: 48/48 unit tests passed; Android lint and debug APK assembly passed; `git diff --check` passed.
+- Attention: inaccessible or genuinely non-empty folders remain preserved; provider deletion failures are shown as incomplete cleanup rather than success.

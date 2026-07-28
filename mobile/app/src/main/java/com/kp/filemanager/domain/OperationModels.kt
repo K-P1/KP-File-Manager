@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines indexed media discovery, context-aware planning, progress, execution, and retained tool contracts; optimized for one-pass organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines organizer contracts; last changed to distinguish cleanup failures from completed operations. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
@@ -393,6 +393,7 @@ data class OperationResult(
     val failedOperations: List<OperationFailure> = emptyList(),
     val skippedOperations: List<PlannedFileOperation> = emptyList(),
     val warnings: List<String> = emptyList(),
+    val cleanupFailures: List<String> = emptyList(),
     val cleanedDirectoryCount: Int = 0,
     val performanceMetrics: PerformanceMetrics = PerformanceMetrics(),
 ) {
@@ -404,4 +405,7 @@ data class OperationResult(
 
     val failures: List<String>
         get() = failedOperations.map { "${it.operation.originalName}: ${it.reason}" }
+
+    val isComplete: Boolean
+        get() = failedOperations.isEmpty() && cleanupFailures.isEmpty()
 }

@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/data/OperationExecutor.kt: Serially executes cached-directory plans, reports exact progress, safely cleans empty sources, and maintains session undo; optimized for media organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/data/OperationExecutor.kt: Executes plans, requires exhaustive old-folder cleanup for completion, and maintains session undo; last changed for reliable ancestor deletion. */
 package com.kp.filemanager.data
 
 import com.kp.filemanager.domain.OperationFailure
@@ -111,7 +111,6 @@ class OperationExecutor(
                 index = index,
                 selectedRootUri = index.root.uri,
                 protectedDirectoryUris = plan.protectedDirectoryUris,
-                relocationFailures = failures.size,
             ) { directory, deleted ->
                 progressReporter?.completeCleanupCandidate(directory.path, deleted)
             }
@@ -127,6 +126,7 @@ class OperationExecutor(
                 addAll(plan.scanWarnings.map { "${it.path}: ${it.reason}" })
                 addAll(cleanupResult?.failures.orEmpty())
             },
+            cleanupFailures = cleanupResult?.failures.orEmpty(),
             cleanedDirectoryCount = cleanupResult?.deletedCount ?: 0,
             performanceMetrics = PerformanceMetrics(
                 scanDurationMillis = plan.performanceMetrics.scanDurationMillis,
@@ -150,7 +150,9 @@ class OperationExecutor(
         journal.mutations.asReversed().forEach { mutation ->
             try {
                 gateway.undo(mutation)
-                mutation.createdDirectoryUris.asReversed().forEach(gateway::deleteDirectoryIfEmpty)
+                mutation.createdDirectoryUris.asReversed().forEach {
+                    gateway.deleteDirectoryIfEmpty(it, null)
+                }
                 restored += mutation.operation.copy(status = OperationStatus.COMPLETED)
             } catch (error: CancellationException) {
                 throw error
@@ -195,7 +197,9 @@ class OperationExecutor(
     }
 
     private fun cleanup(prepared: PreparedDirectory?) {
-        prepared?.createdDirectoryUris?.asReversed()?.forEach(gateway::deleteDirectoryIfEmpty)
+        prepared?.createdDirectoryUris?.asReversed()?.forEach {
+            gateway.deleteDirectoryIfEmpty(it, null)
+        }
     }
 
     private fun safeMessage(error: IllegalStateException): String =

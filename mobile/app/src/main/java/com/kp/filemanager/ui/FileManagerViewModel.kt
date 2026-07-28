@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt: Orchestrates the indexed pipeline and throttles one immutable progress state while keeping provider work off the main thread; optimized for media organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt: Orchestrates organizer state and progress; last changed to keep failed folder cleanup out of the completed state. */
 package com.kp.filemanager.ui
 
 import androidx.compose.runtime.Stable
@@ -322,15 +322,15 @@ class FileManagerViewModel(
                             isWorking = false,
                             progressText = "",
                             activePlan = outcome.plan,
-                            workflowState = if (outcome.failedOperations.isEmpty()) {
+                            workflowState = if (outcome.isComplete) {
                                 OrganizerWorkflowState.APPLY_COMPLETE
                             } else {
                                 OrganizerWorkflowState.APPLY_PARTIAL_FAILURE
                             },
-                            statusTitle = if (outcome.failedOperations.isEmpty()) {
-                                "Operation complete"
-                            } else {
-                                "Operation partly complete"
+                            statusTitle = when {
+                                outcome.isComplete -> "Operation complete"
+                                outcome.failedOperations.isEmpty() -> "Cleanup incomplete"
+                                else -> "Operation partly complete"
                             },
                             statusMessage = buildString {
                                 append(
@@ -338,8 +338,8 @@ class FileManagerViewModel(
                                         "skipped ${progress.skippedCount}, failed ${progress.failedCount}.",
                                 )
                                 append(" Cleaned ${outcome.cleanedDirectoryCount} empty folder(s).")
-                                if (outcome.failedOperations.isNotEmpty()) {
-                                    append(" Empty-folder cleanup was skipped because relocation failures occurred.")
+                                if (outcome.cleanupFailures.isNotEmpty()) {
+                                    append(" Some empty folders could not be removed, so cleanup is incomplete.")
                                 }
                             },
                             failures = outcome.failures + warnings,

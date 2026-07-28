@@ -21,7 +21,7 @@ Status values: `Pending`, `In progress`, `Complete`, `Deferred`.
 | Add comprehensive automated tests | Complete | 27 unit tests pass across parser, scanner, matching, formatting, planning, conflict resolution, idempotency, retained tools, execution, partial failure, and undo. |
 | Run Android verification | Complete | `mobile/run_checks.bat` passes unit tests, Android lint, and debug APK assembly. |
 | UI/UX redesign from `docs/UI.md` | Complete | Implemented the Android design foundation, adaptive phone/tablet navigation, full organizer state flow, review search/tabs/filters/sort, safe confirmation/conflict/undo flows, inline file-tool previews, settings, semantic states, and verified light/dark theming. |
-| Optimize the mobile media workflow | Complete | Replaced repeated parsing/scanning with one reusable index, context-aware planning, cached SAF paths, same-provider moves with verified streaming fallback, exact progress/ETA, safe cleanup, and debug-only phase/provider metrics. |
+| Optimize the mobile media workflow | Complete | Replaced repeated parsing/scanning with one reusable index, context-aware planning, cached SAF paths, same-provider moves with verified streaming fallback, exact progress/ETA, exhaustive parent-aware cleanup, and debug-only phase/provider metrics. |
 
 ## Implementation Log
 
@@ -77,3 +77,11 @@ Status values: `Pending`, `In progress`, `Complete`, `Deferred`.
 - Checks: regression tests were written and observed failing before implementation; 46/46 unit tests pass; `mobile/run_checks.bat` passes Android lint and debug APK assembly; `git diff --check` passes.
 - Measured: source discovery is one recursive scan instead of up to two full-tree scans; the two-item regression fixture parses each item once (two parses instead of the former three, where the video was parsed during both scanning and grouping); repeated path/name resolution now reuses one projected child query per uncached directory instead of issuing another child query plus an extra document query for each matched entry.
 - Attention: native move/rename behavior still requires physical-device coverage for release providers. Unsupported direct move is cached per authority and safely falls back, but Android provider implementations remain outside the app's control.
+
+### 2026-07-28 - Exhaustive old-folder cleanup
+
+- Changed: removed relocation-failure cleanup gating, passed indexed parent identity into empty-directory deletion, refreshed cached SAF listings before checks and after child deletion, and made cleanup failures block the completed UI state.
+- Why: a successfully deleted child could remain in its parent's cached listing, leaving empty ancestors behind; unrelated file failures also prevented safe cleanup of every other verified-empty source folder.
+- Files: `DirectoryScanner.kt`, `EmptyDirectoryCleaner.kt`, `OperationModels.kt`, `OperationExecutor.kt`, `SafDocumentGateway.kt`, `FileManagerViewModel.kt`, and focused cleaner/executor tests.
+- Checks: observed the cleanup-after-relocation-failure regression fail before implementation; 48/48 unit tests pass; Android lint and debug APK assembly pass; `git diff --check` passes.
+- Attention: the selected root, destination hierarchy, inaccessible folders, and folders containing unrelated files remain protected. A provider refusal now leaves the workflow visibly incomplete instead of reporting success.

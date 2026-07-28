@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/data/SafDocumentGateway.kt: Implements cached projected SAF discovery, same-provider moves, verified streaming fallback, and exact overwrite-safe mutations; optimized for large libraries. */
+/** mobile/app/src/main/java/com/kp/filemanager/data/SafDocumentGateway.kt: Implements cached SAF discovery and safe mutations; last changed to refresh parent listings during exhaustive empty-folder cleanup. */
 package com.kp.filemanager.data
 
 import android.content.ContentResolver
@@ -166,21 +166,37 @@ class SafDocumentGateway(context: Context) : DocumentGateway {
         } catch (error: Exception) {
             recreatedParent?.createdDirectoryUris
                 ?.asReversed()
-                ?.forEach(::deleteDirectoryIfEmpty)
+                ?.forEach { deleteDirectoryIfEmpty(it, null) }
             throw error
         }
     }
 
-    override fun deleteDirectoryIfEmpty(uri: String): Boolean {
+    override fun deleteDirectoryIfEmpty(uri: String, parentUri: String?): Boolean {
         val directory = Uri.parse(uri)
-        val record = queryDocument(directory) ?: return true
-        if (!record.isDirectory || childrenRecords(directory).isNotEmpty()) return false
-        val deleted = DocumentsContract.deleteDocument(resolver, directory)
-        if (deleted) {
-            childCache.remove(uri)
-            directoryPathCache.entries.removeAll { it.value == directory }
+        val record = queryDocument(directory)
+        if (record == null) {
+            invalidateDeletedDirectory(directory, parentUri)
+            return true
         }
-        return deleted
+        if (!record.isDirectory) return false
+        invalidateChildren(directory)
+        if (childrenRecords(directory).isNotEmpty()) return false
+        val deleted = DocumentsContract.deleteDocument(resolver, directory)
+        if (!deleted) {
+            throw IOException("The document provider declined to delete an empty directory.")
+        }
+        invalidateDeletedDirectory(directory, parentUri)
+        return true
+    }
+
+    private fun invalidateDeletedDirectory(directory: Uri, parentUri: String?) {
+        childCache.remove(directory.toString())
+        if (parentUri == null) {
+            childCache.clear()
+        } else {
+            invalidateChildren(Uri.parse(parentUri))
+        }
+        directoryPathCache.entries.removeAll { it.value == directory }
     }
 
     override fun operationCounters(): ProviderOperationCounters = counters

@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/DirectoryScanner.kt: Performs one cancellable traversal that indexes document metadata and parsed media names; optimized for media organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/DirectoryScanner.kt: Indexes document trees and defines parent-aware empty-directory cleanup access; last changed for exhaustive ancestor cleanup. */
 package com.kp.filemanager.domain
 
 import java.io.IOException
@@ -24,7 +24,7 @@ interface DocumentTreeSource {
 }
 
 fun interface DirectoryCleanupGateway {
-    fun deleteDirectoryIfEmpty(uri: String): Boolean
+    fun deleteDirectoryIfEmpty(uri: String, parentUri: String?): Boolean
 }
 
 class DirectoryScanner(

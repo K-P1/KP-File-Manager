@@ -1,11 +1,15 @@
-/** mobile/app/src/test/java/com/kp/filemanager/data/OperationExecutorTest.kt: Verifies execution, shared-directory caching, failure isolation, and reverse-order undo; updated for pipeline optimization. */
+/** mobile/app/src/test/java/com/kp/filemanager/data/OperationExecutorTest.kt: Verifies execution, cleanup completion, failure isolation, and undo; last changed for exhaustive old-folder cleanup. */
 package com.kp.filemanager.data
 
+import com.kp.filemanager.domain.DocumentEntry
+import com.kp.filemanager.domain.IndexedDirectory
 import com.kp.filemanager.domain.MediaFileType
+import com.kp.filemanager.domain.MediaIndex
 import com.kp.filemanager.domain.OperationPlan
 import com.kp.filemanager.domain.OperationStatus
 import com.kp.filemanager.domain.OperationType
 import com.kp.filemanager.domain.PlannedFileOperation
+import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -83,6 +87,33 @@ class OperationExecutorTest {
         assertEquals(listOf("Movies/A"), gateway.preparedDirectoryPaths)
     }
 
+    @Test
+    fun `executor cleans verified empty folders even when a relocation fails`() {
+        val gateway = FakeMutationGateway(existingSources = mutableSetOf("source-a", "source-b"))
+        gateway.failOnApply += "source-b"
+
+        OperationExecutor(gateway).execute(
+            plan(operation("source-a", "A.mkv"), operation("source-b", "B.mkv"))
+                .copy(mediaIndex = indexWithOldEmptyDirectory()),
+        )
+
+        assertTrue("old-empty" in gateway.cleanedDirectories)
+    }
+
+    @Test
+    fun `executor does not report completion when empty folder cleanup fails`() {
+        val gateway = FakeMutationGateway(existingSources = mutableSetOf("source-a"))
+        gateway.failOnCleanup += "old-empty"
+
+        val result = OperationExecutor(gateway).execute(
+            plan(operation("source-a", "A.mkv"))
+                .copy(mediaIndex = indexWithOldEmptyDirectory()),
+        )
+
+        assertFalse(result.isComplete)
+        assertEquals(1, result.cleanupFailures.size)
+    }
+
     private fun operation(uri: String, newName: String) = PlannedFileOperation(
         sourceUri = uri,
         sourceParentUri = "root",
@@ -100,12 +131,19 @@ class OperationExecutorTest {
     private fun plan(vararg operations: PlannedFileOperation) =
         OperationPlan("destination", operations.toList())
 
+    private fun indexWithOldEmptyDirectory() = MediaIndex(
+        root = DocumentEntry("root", "", "Downloads", true, 0),
+        directories = listOf(IndexedDirectory("old-empty", "root", "Old", "Old", 1)),
+        items = emptyList(),
+    )
+
     private class FakeMutationGateway(
         private val existingSources: MutableSet<String>,
     ) : DocumentMutationGateway {
         val destinations = mutableSetOf<String>()
         val failOnApply = mutableSetOf<String>()
         val failOnUndo = mutableSetOf<String>()
+        val failOnCleanup = mutableSetOf<String>()
         val appliedSources = mutableListOf<String>()
         val undoneSources = mutableListOf<String>()
         val cleanedDirectories = mutableListOf<String>()
@@ -147,7 +185,8 @@ class OperationExecutorTest {
             destinations -= mutation.operation.destinationPath
         }
 
-        override fun deleteDirectoryIfEmpty(uri: String): Boolean {
+        override fun deleteDirectoryIfEmpty(uri: String, parentUri: String?): Boolean {
+            if (uri in failOnCleanup) throw IOException("provider failure")
             cleanedDirectories += uri
             return true
         }
