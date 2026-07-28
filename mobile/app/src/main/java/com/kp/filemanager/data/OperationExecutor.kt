@@ -1,8 +1,12 @@
-/** mobile/app/src/main/java/com/kp/filemanager/data/OperationExecutor.kt: Revalidates and applies approved plans while maintaining the latest in-memory reverse-order undo journal; created for the media refactor. */
+/** mobile/app/src/main/java/com/kp/filemanager/data/OperationExecutor.kt: Serially executes cached-directory plans, reports exact progress, safely cleans empty sources, and maintains session undo; optimized for media organization. */
 package com.kp.filemanager.data
 
 import com.kp.filemanager.domain.OperationFailure
+import com.kp.filemanager.domain.EmptyDirectoryCleaner
+import com.kp.filemanager.domain.OrganizationPhase
 import com.kp.filemanager.domain.OperationPlan
+import com.kp.filemanager.domain.PerformanceMetrics
+import com.kp.filemanager.domain.ProgressReporter
 import com.kp.filemanager.domain.OperationResult
 import com.kp.filemanager.domain.OperationStatus
 import com.kp.filemanager.domain.OperationType
@@ -11,50 +15,79 @@ import kotlinx.coroutines.CancellationException
 
 class OperationExecutor(
     private val gateway: DocumentMutationGateway,
+    private val cleaner: EmptyDirectoryCleaner = EmptyDirectoryCleaner(gateway),
+    private val nanoTime: () -> Long = System::nanoTime,
 ) {
     private var lastJournal: UndoJournal? = null
 
-    fun execute(plan: OperationPlan): OperationResult {
+    fun execute(
+        plan: OperationPlan,
+        progressReporter: ProgressReporter? = null,
+    ): OperationResult {
         val completed = mutableListOf<PlannedFileOperation>()
         val failures = mutableListOf<OperationFailure>()
         val skipped = plan.operations.filter { it.status != OperationStatus.READY }
         val mutations = mutableListOf<DocumentMutation>()
+        val preparedDirectories = mutableMapOf<String, PreparedDirectory>()
+        progressReporter?.begin(OrganizationPhase.ORGANIZING_FILES, plan.operations.size)
+        skipped.forEach { operation ->
+            progressReporter?.currentItem(operation.originalName)
+            progressReporter?.completeItem(operation.operationType, skipped = true)
+        }
 
+        val organizationStarted = nanoTime()
         plan.operations.filter { it.status == OperationStatus.READY }.forEach { operation ->
+            progressReporter?.currentItem(operation.originalName)
             val validationFailure = validate(operation)
             if (validationFailure != null) {
                 failures += OperationFailure(operation, validationFailure)
+                progressReporter?.completeItem(operation.operationType, failed = true)
                 return@forEach
             }
             var prepared: PreparedDirectory? = null
             try {
-                prepared = gateway.ensureDirectoryPath(
-                    treeUri = operation.destinationTreeUri,
-                    relativePath = operation.destinationDirectoryPath,
-                )
+                prepared = preparedDirectories[operation.destinationDirectoryPath]
+                    ?: gateway.ensureDirectoryPath(
+                        treeUri = operation.destinationTreeUri,
+                        relativePath = operation.destinationDirectoryPath,
+                    )
                 val mutation = gateway.apply(operation, prepared.uri)
-                    .copy(createdDirectoryUris = prepared.createdDirectoryUris)
+                    .copy(
+                        createdDirectoryUris = prepared.createdDirectoryUris,
+                        beforeTreeUri = plan.mediaIndex?.treeUri.orEmpty(),
+                        beforeParentPath = operation.sourcePath.substringBeforeLast('/', ""),
+                    )
                 mutations += mutation
                 completed += operation.copy(status = OperationStatus.COMPLETED)
+                preparedDirectories[operation.destinationDirectoryPath] = prepared.copy(
+                    createdDirectoryUris = emptyList(),
+                )
+                progressReporter?.completeItem(operation.operationType)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: SecurityException) {
                 cleanup(prepared)
                 failures += OperationFailure(operation, "The document provider denied this change.")
+                progressReporter?.completeItem(operation.operationType, failed = true)
             } catch (error: IllegalStateException) {
                 cleanup(prepared)
                 failures += OperationFailure(operation, safeMessage(error))
+                progressReporter?.completeItem(operation.operationType, failed = true)
             } catch (error: IllegalArgumentException) {
                 cleanup(prepared)
                 failures += OperationFailure(operation, "The document provider rejected this change.")
+                progressReporter?.completeItem(operation.operationType, failed = true)
             } catch (error: UnsupportedOperationException) {
                 cleanup(prepared)
                 failures += OperationFailure(operation, "The document provider does not support this change.")
+                progressReporter?.completeItem(operation.operationType, failed = true)
             } catch (error: java.io.IOException) {
                 cleanup(prepared)
                 failures += OperationFailure(operation, "The document provider could not complete this change.")
+                progressReporter?.completeItem(operation.operationType, failed = true)
             }
         }
+        val organizationDurationMillis = nanosToMillis(nanoTime() - organizationStarted)
 
         if (mutations.isNotEmpty()) lastJournal = UndoJournal(plan, mutations)
         val completedBySource = completed.associateBy(PlannedFileOperation::sourceUri)
@@ -68,12 +101,42 @@ class OperationExecutor(
                     ?: operation
             },
         )
+        val cleanupStarted = nanoTime()
+        val cleanupResult = plan.mediaIndex?.let { index ->
+            val candidates = index.directories.count {
+                it.uri != index.root.uri && it.uri !in plan.protectedDirectoryUris
+            }
+            progressReporter?.begin(OrganizationPhase.CLEANING_UP, candidates)
+            cleaner.clean(
+                index = index,
+                selectedRootUri = index.root.uri,
+                protectedDirectoryUris = plan.protectedDirectoryUris,
+                relocationFailures = failures.size,
+            ) { directory, deleted ->
+                progressReporter?.completeCleanupCandidate(directory.path, deleted)
+            }
+        }
+        val cleanupDurationMillis = nanosToMillis(nanoTime() - cleanupStarted)
+        progressReporter?.complete()
         return OperationResult(
             plan = resultPlan,
             completedOperations = completed,
             failedOperations = failures,
             skippedOperations = skipped,
-            warnings = plan.scanWarnings.map { "${it.path}: ${it.reason}" },
+            warnings = buildList {
+                addAll(plan.scanWarnings.map { "${it.path}: ${it.reason}" })
+                addAll(cleanupResult?.failures.orEmpty())
+            },
+            cleanedDirectoryCount = cleanupResult?.deletedCount ?: 0,
+            performanceMetrics = PerformanceMetrics(
+                scanDurationMillis = plan.performanceMetrics.scanDurationMillis,
+                matchingPlanningDurationMillis = plan.performanceMetrics.matchingPlanningDurationMillis,
+                organizationDurationMillis = organizationDurationMillis,
+                cleanupDurationMillis = cleanupDurationMillis,
+                providerOperations = gateway.operationCounters(),
+                failedOperations = failures.size,
+                skippedOperations = skipped.size,
+            ),
         )
     }
 
@@ -142,4 +205,6 @@ class OperationExecutor(
         val plan: OperationPlan,
         val mutations: List<DocumentMutation>,
     )
+
+    private fun nanosToMillis(value: Long): Long = value.coerceAtLeast(0) / 1_000_000L
 }

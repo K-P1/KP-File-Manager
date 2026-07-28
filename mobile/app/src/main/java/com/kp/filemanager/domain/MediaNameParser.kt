@@ -1,10 +1,14 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/MediaNameParser.kt: Deterministically parses release-style media filenames into normalized metadata; created for the media refactor. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/MediaNameParser.kt: Compiles and applies deterministic release-name parsing once per indexed media item; optimized for the indexed pipeline. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
 
-class MediaNameParser {
-    fun parse(file: ScannedFile): ParsedMediaName {
+fun interface MediaMetadataParser {
+    fun parse(file: ScannedFile): ParsedMediaName
+}
+
+class MediaNameParser : MediaMetadataParser {
+    override fun parse(file: ScannedFile): ParsedMediaName {
         val parserText = preprocess(file.baseName)
         val strongEpisode = findStrongEpisode(parserText)
         val weakEpisode = if (strongEpisode == null) findWeakEpisode(parserText) else null

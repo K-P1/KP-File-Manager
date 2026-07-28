@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt: Owns the non-visual scan, review, apply, and undo state machine; refactored to execute only retained preview plans. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt: Orchestrates the indexed pipeline and throttles one immutable progress state while keeping provider work off the main thread; optimized for media organization. */
 package com.kp.filemanager.ui
 
 import androidx.compose.runtime.Stable
@@ -8,8 +8,12 @@ import androidx.lifecycle.viewModelScope
 import com.kp.filemanager.data.FileOperationRepository
 import com.kp.filemanager.domain.OperationMode
 import com.kp.filemanager.domain.OperationRequest
+import com.kp.filemanager.domain.OrganizationProgress
+import com.kp.filemanager.domain.LibraryContextType
 import com.kp.filemanager.domain.PlanConflictResolver
+import java.io.IOException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +41,7 @@ interface FileManagerActions {
     fun cancelScan()
     fun skipConflict(sourceUri: String)
     fun renameConflict(sourceUri: String, alternativeName: String)
+    fun resolveLibraryContext(contextType: LibraryContextType)
     fun run()
     fun undo()
     fun done()
@@ -63,23 +68,40 @@ class FileManagerViewModel(
 
     override fun selectMode(mode: OperationMode) {
         if (_uiState.value.mode == mode) return
+        previewJob?.cancel()
+        previewJob = null
         invalidatePlan { copy(mode = mode) }
     }
 
     override fun selectSource(uri: String) {
-        val name = runCatching { repository.folderName(uri) }.getOrDefault("Selected folder")
+        previewJob?.cancel()
+        previewJob = null
         invalidatePlan {
             copy(
                 sourceUri = uri,
-                sourceName = name,
+                sourceName = "Selected folder",
                 workflowState = OrganizerWorkflowState.FOLDER_SELECTED,
             )
+        }
+        viewModelScope.launch {
+            val name = safeFolderName(uri)
+            mutate {
+                if (sourceUri == uri) copy(sourceName = name) else this
+            }
+            if (_uiState.value.sourceUri == uri && _uiState.value.mode == OperationMode.ORGANIZE_MEDIA) {
+                preview()
+            }
         }
     }
 
     override fun selectDestination(uri: String) {
-        val name = runCatching { repository.folderName(uri) }.getOrDefault("Selected folder")
-        invalidatePlan { copy(destinationUri = uri, destinationName = name) }
+        invalidatePlan { copy(destinationUri = uri, destinationName = "Selected folder") }
+        viewModelScope.launch {
+            val name = safeFolderName(uri)
+            mutate {
+                if (destinationUri == uri) copy(destinationName = name) else this
+            }
+        }
     }
 
     override fun clearDestination() = invalidatePlan { copy(destinationUri = null, destinationName = "") }
@@ -109,7 +131,7 @@ class FileManagerViewModel(
 
     override fun preview() {
         val snapshot = _uiState.value
-        if (!snapshot.canPreview) return
+        if (!snapshot.canPreview || previewJob?.isActive == true) return
         val request = snapshot.toRequest()
         previewJob = viewModelScope.launch {
             mutate {
@@ -120,7 +142,7 @@ class FileManagerViewModel(
                     } else {
                         OrganizerWorkflowState.REVIEWING
                     },
-                    scanProgress = com.kp.filemanager.domain.ScanProgress(),
+                    organizationProgress = OrganizationProgress(),
                     progressText = if (mode == OperationMode.ORGANIZE_MEDIA) {
                         "Scanning media and building a safe change plan…"
                     } else {
@@ -136,12 +158,16 @@ class FileManagerViewModel(
             try {
                 repository.preview(request) { progress ->
                     val now = System.nanoTime()
-                    if (progress.filesScanned <= 1 || now - lastProgressUpdateNanos >= PROGRESS_UPDATE_INTERVAL_NANOS) {
+                    if (
+                        progress.processedItems <= 1 ||
+                        progress.percent == 100 ||
+                        now - lastProgressUpdateNanos >= PROGRESS_UPDATE_INTERVAL_NANOS
+                    ) {
                         lastProgressUpdateNanos = now
                         mutate {
                             copy(
-                                scanProgress = progress,
-                                progressText = "Scanned ${progress.filesScanned} file(s): ${progress.currentPath}",
+                                organizationProgress = progress,
+                                progressText = progressText(progress),
                             )
                         }
                     }
@@ -221,6 +247,40 @@ class FileManagerViewModel(
         }
     }
 
+    override fun resolveLibraryContext(contextType: LibraryContextType) {
+        val plan = _uiState.value.activePlan ?: return
+        if (_uiState.value.isWorking) return
+        viewModelScope.launch {
+            mutate { copy(isWorking = true) }
+            repository.resolveLibraryContext(plan, contextType).fold(
+                onSuccess = { result ->
+                    mutate {
+                        copy(
+                            isWorking = false,
+                            activePlan = result.plan,
+                            workflowState = if (result.plan.hasBlockingConflicts) {
+                                OrganizerWorkflowState.RESOLVING_CONFLICTS
+                            } else {
+                                OrganizerWorkflowState.REVIEWING
+                            },
+                            statusTitle = null,
+                            statusMessage = null,
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    mutate {
+                        copy(
+                            isWorking = false,
+                            statusTitle = "Couldnâ€™t resolve library context",
+                            statusMessage = error.message ?: "Choose another library context.",
+                        )
+                    }
+                },
+            )
+        }
+    }
+
     override fun run() {
         val plan = _uiState.value.activePlan ?: return
         if (!_uiState.value.canApply) return
@@ -236,9 +296,28 @@ class FileManagerViewModel(
                     hasManualReviewChanges = false,
                 )
             }
-            repository.execute(plan).fold(
+            repository.execute(plan) { progress ->
+                val now = System.nanoTime()
+                if (
+                    progress.processedItems <= 1 ||
+                    progress.percent == 100 ||
+                    now - lastProgressUpdateNanos >= PROGRESS_UPDATE_INTERVAL_NANOS
+                ) {
+                    lastProgressUpdateNanos = now
+                    mutate {
+                        copy(
+                            organizationProgress = progress,
+                            progressText = progressText(progress),
+                        )
+                    }
+                }
+            }.fold(
                 onSuccess = { outcome ->
                     mutate {
+                        val progress = organizationProgress
+                        val warnings = outcome.warnings.filterNot { warning ->
+                            warning in failures
+                        }
                         copy(
                             isWorking = false,
                             progressText = "",
@@ -253,9 +332,21 @@ class FileManagerViewModel(
                             } else {
                                 "Operation partly complete"
                             },
-                            statusMessage = "Changed ${outcome.completedCount} of ${outcome.plan.readyCount} ready item(s).",
-                            failures = outcome.failures,
+                            statusMessage = buildString {
+                                append(
+                                    "Moved ${progress.movedCount}, renamed ${progress.renamedCount}, " +
+                                        "skipped ${progress.skippedCount}, failed ${progress.failedCount}.",
+                                )
+                                append(" Cleaned ${outcome.cleanedDirectoryCount} empty folder(s).")
+                                if (outcome.failedOperations.isNotEmpty()) {
+                                    append(" Empty-folder cleanup was skipped because relocation failures occurred.")
+                                }
+                            },
+                            failures = outcome.failures + warnings,
                             canUndo = repository.canUndo(),
+                            organizationProgress = progress.copy(
+                                cleanedFolderCount = outcome.cleanedDirectoryCount,
+                            ),
                         )
                     }
                 },
@@ -406,6 +497,32 @@ class FileManagerViewModel(
                 tvFolderName = state.tvFolderName,
             ),
         )
+    }
+
+    private fun progressText(progress: OrganizationProgress): String = buildString {
+        append(progress.phase.label)
+        if (progress.isIndeterminate) {
+            append(": ${progress.filesDiscovered} files found")
+        } else {
+            append(": ${progress.processedItems}/${progress.totalItems}")
+        }
+        progress.currentItem.takeIf(String::isNotBlank)?.let { append(" â€¢ $it") }
+    }
+
+    private suspend fun safeFolderName(uri: String): String = try {
+        repository.folderName(uri)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: SecurityException) {
+        "Selected folder"
+    } catch (_: IllegalArgumentException) {
+        "Selected folder"
+    } catch (_: IllegalStateException) {
+        "Selected folder"
+    } catch (_: IOException) {
+        "Selected folder"
+    } catch (_: UnsupportedOperationException) {
+        "Selected folder"
     }
 
     class Factory(

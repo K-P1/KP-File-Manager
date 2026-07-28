@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/screens/OrganizerScreen.kt: Renders every organizer workflow state, review, conflicts, confirmation, results, and undo; created for the UI refactor. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/screens/OrganizerScreen.kt: Renders context prompting, phased determinate progress, review, results, cleanup summary, and undo; optimized for media organization. */
 package com.kp.filemanager.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
@@ -72,6 +72,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kp.filemanager.domain.OperationPlan
+import com.kp.filemanager.domain.LibraryContextType
 import com.kp.filemanager.domain.OperationStatus
 import com.kp.filemanager.domain.OperationType
 import com.kp.filemanager.domain.PlannedFileOperation
@@ -118,6 +119,7 @@ fun OrganizerScreen(
     var conflictOperationUri by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedOperation = uiState.preview.firstOrNull { it.sourceUri == selectedOperationUri }
     val conflictOperation = uiState.preview.firstOrNull { it.sourceUri == conflictOperationUri }
+    val requiresLibraryContext = uiState.activePlan?.libraryContext?.type == LibraryContextType.AMBIGUOUS
 
     val bottomBar: @Composable () -> Unit = {
         when (uiState.workflowState) {
@@ -312,6 +314,46 @@ fun OrganizerScreen(
             },
         )
     }
+    if (requiresLibraryContext) {
+        AlertDialog(
+            onDismissRequest = {},
+            icon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
+            title = { Text("How should this folder be organized?") },
+            text = {
+                Text(
+                    "This folder contains mixed structural signals. Choose once; the existing scan and parsed index will be reused.",
+                )
+            },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    Button(
+                        enabled = !uiState.isWorking,
+                        onClick = {
+                            actions.resolveLibraryContext(LibraryContextType.GENERIC_SOURCE)
+                        },
+                    ) {
+                        Text("Generic source")
+                    }
+                    TextButton(
+                        enabled = !uiState.isWorking,
+                        onClick = {
+                            actions.resolveLibraryContext(LibraryContextType.MOVIES_LIBRARY_ROOT)
+                        },
+                    ) {
+                        Text("Existing Movies library")
+                    }
+                    TextButton(
+                        enabled = !uiState.isWorking,
+                        onClick = {
+                            actions.resolveLibraryContext(LibraryContextType.TV_LIBRARY_ROOT)
+                        },
+                    ) {
+                        Text("Existing TV library")
+                    }
+                }
+            },
+        )
+    }
     if (selectedOperation != null) {
         OperationDetailsSheet(
             operation = selectedOperation,
@@ -432,6 +474,7 @@ private fun ScanningContent(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val progress = uiState.organizationProgress
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
@@ -439,12 +482,21 @@ private fun ScanningContent(
         verticalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.section),
     ) {
         ProgressPanel(
-            title = "Scanning Media",
-            supportingText = "Looking for movies, TV episodes, subtitles, artwork, and metadata.",
-            progressLabel = "${uiState.scanProgress.filesScanned} files scanned",
-            currentLabel = "Currently scanning",
-            currentValue = uiState.scanProgress.currentPath,
+            title = progress.phase.label,
+            supportingText = if (progress.isIndeterminate) {
+                "Looking for movies, TV episodes, subtitles, artwork, and metadata."
+            } else {
+                "Using the completed index to build one deterministic plan."
+            },
+            progressLabel = if (progress.isIndeterminate) {
+                "${progress.filesDiscovered} files â€¢ ${progress.directoriesDiscovered} folders discovered"
+            } else {
+                "${progress.processedItems} / ${progress.totalItems} â€¢ ${progress.remainingItems} remaining"
+            },
+            currentLabel = "Current item",
+            currentValue = progress.currentItem,
             onCancel = onCancel,
+            progressFraction = progress.percent?.div(100f),
             modifier = Modifier.fillMaxWidth(),
         )
         Row(
@@ -453,19 +505,19 @@ private fun ScanningContent(
         ) {
             StatCard(
                 label = "Movies",
-                value = uiState.scanProgress.moviesDetected.toString(),
+                value = progress.moviesDetected.toString(),
                 icon = Icons.Outlined.Movie,
                 modifier = Modifier.weight(1f),
             )
             StatCard(
                 label = "Episodes",
-                value = uiState.scanProgress.episodesDetected.toString(),
+                value = progress.episodesDetected.toString(),
                 icon = Icons.Outlined.Tv,
                 modifier = Modifier.weight(1f),
             )
             StatCard(
                 label = "Subtitles",
-                value = uiState.scanProgress.subtitlesDetected.toString(),
+                value = progress.subtitlesDetected.toString(),
                 icon = Icons.Outlined.Subtitles,
                 modifier = Modifier.weight(1f),
             )
@@ -1006,14 +1058,47 @@ private fun ApplyingContent(
     uiState: FileManagerUiState,
     modifier: Modifier = Modifier,
 ) {
-    ProgressPanel(
-        title = "Organizing Library",
-        supportingText = "Applying the approved plan without overwriting existing files.",
-        progressLabel = "Processing ${uiState.activePlan?.readyCount ?: 0} changes",
-        currentLabel = "Important",
-        currentValue = "Please keep KP File Manager open until the operation completes.",
-        modifier = modifier.padding(MaterialTheme.spacing.section),
-    )
+    val progress = uiState.organizationProgress
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(MaterialTheme.spacing.section),
+        verticalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.section),
+    ) {
+        ProgressPanel(
+            title = progress.phase.label,
+            supportingText = "Applying the approved plan without overwriting existing files.",
+            progressLabel = buildString {
+                append("${progress.processedItems} / ${progress.totalItems}")
+                append(" â€¢ ${progress.remainingItems} remaining")
+                progress.etaMillis?.let { append(" â€¢ ETA ${formatEta(it)}") }
+            },
+            currentLabel = "Current item",
+            currentValue = progress.currentItem,
+            progressFraction = progress.percent?.div(100f),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.tight),
+        ) {
+            StatCard("Moved", progress.movedCount.toString(), Icons.Outlined.FolderOpen, Modifier.weight(1f))
+            StatCard("Renamed", progress.renamedCount.toString(), Icons.Outlined.Refresh, Modifier.weight(1f))
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.tight),
+        ) {
+            StatCard("Skipped", progress.skippedCount.toString(), Icons.Outlined.WarningAmber, Modifier.weight(1f))
+            StatCard(
+                "Failed",
+                progress.failedCount.toString(),
+                Icons.Outlined.ErrorOutline,
+                Modifier.weight(1f),
+                if (progress.failedCount > 0) MessageTone.ERROR else MessageTone.INFO,
+            )
+        }
+    }
 }
 
 @Composable
@@ -1028,6 +1113,7 @@ private fun ResultsContent(
         it.status in setOf(OperationStatus.SKIPPED, OperationStatus.UNCHANGED)
     } ?: 0
     val partial = uiState.workflowState == OrganizerWorkflowState.APPLY_PARTIAL_FAILURE
+    val progress = uiState.organizationProgress
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(MaterialTheme.spacing.section),
@@ -1078,15 +1164,30 @@ private fun ResultsContent(
         if (uiState.failures.isNotEmpty()) {
             item {
                 StatusMessage(
-                    title = "Failed operations",
-                    message = "${uiState.failures.size} files could not be changed. Successful work was kept.",
+                    title = "Items needing attention",
+                    message = "${uiState.failures.size} issue(s) were reported. Successful work was kept.",
                     tone = MessageTone.ERROR,
                     details = uiState.failures,
                     modifier = Modifier.fillMaxWidth().widthIn(max = 640.dp),
                 )
             }
         }
+        if (progress.cleanedFolderCount > 0) {
+            item {
+                StatusMessage(
+                    title = "Empty folders cleaned",
+                    message = "${progress.cleanedFolderCount} verified-empty source folder(s) were removed.",
+                    tone = MessageTone.SUCCESS,
+                    modifier = Modifier.fillMaxWidth().widthIn(max = 640.dp),
+                )
+            }
+        }
     }
+}
+
+private fun formatEta(etaMillis: Long): String {
+    val seconds = (etaMillis / 1_000L).coerceAtLeast(1)
+    return if (seconds < 60) "${seconds}s" else "${seconds / 60}m ${seconds % 60}s"
 }
 
 @Composable

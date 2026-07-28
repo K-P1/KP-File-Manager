@@ -2,6 +2,8 @@
 package com.kp.filemanager.data
 
 import com.kp.filemanager.domain.DocumentTreeSource
+import com.kp.filemanager.domain.DirectoryCleanupGateway
+import com.kp.filemanager.domain.ProviderOperationCounters
 import com.kp.filemanager.domain.PlannedFileOperation
 
 data class PreparedDirectory(
@@ -18,16 +20,19 @@ data class DocumentMutation(
     val afterName: String,
     val createdDirectoryUris: List<String>,
     val operation: PlannedFileOperation,
+    val beforeTreeUri: String = "",
+    val beforeParentPath: String = "",
 )
 
-interface DocumentMutationGateway {
+interface DocumentMutationGateway : DirectoryCleanupGateway {
     fun documentExists(uri: String): Boolean
     fun documentExistsInParent(uri: String, parentUri: String): Boolean
     fun destinationExists(treeUri: String, relativePath: String, excludingUri: String? = null): Boolean
     fun ensureDirectoryPath(treeUri: String, relativePath: String): PreparedDirectory
     fun apply(operation: PlannedFileOperation, targetParentUri: String): DocumentMutation
     fun undo(mutation: DocumentMutation)
-    fun deleteDirectoryIfEmpty(uri: String): Boolean
+    fun operationCounters(): ProviderOperationCounters = ProviderOperationCounters()
+    fun resetOperationCounters() = Unit
 }
 
 interface DocumentGateway : DocumentTreeSource, DocumentMutationGateway {

@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/components/KpComponents.kt: Provides shared accessible cards, headers, status, progress, and action components; created for the UI refactor. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/components/KpComponents.kt: Provides accessible cards, headers, status, determinate progress, and action components; updated for pipeline progress. */
 package com.kp.filemanager.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
@@ -281,6 +281,7 @@ fun ProgressPanel(
     currentLabel: String? = null,
     currentValue: String? = null,
     onCancel: (() -> Unit)? = null,
+    progressFraction: Float? = null,
 ) {
     Column(
         modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -294,7 +295,15 @@ fun ProgressPanel(
             contentColor = MaterialTheme.colorScheme.primary,
         ) {
             Box(contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(modifier = Modifier.size(40.dp), strokeWidth = 3.dp)
+                if (progressFraction == null) {
+                    CircularProgressIndicator(modifier = Modifier.size(40.dp), strokeWidth = 3.dp)
+                } else {
+                    CircularProgressIndicator(
+                        progress = { progressFraction.coerceIn(0f, 1f) },
+                        modifier = Modifier.size(40.dp),
+                        strokeWidth = 3.dp,
+                    )
+                }
             }
         }
         Column(
@@ -312,7 +321,14 @@ fun ProgressPanel(
                 style = MaterialTheme.typography.bodyLarge,
             )
         }
-        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        if (progressFraction == null) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        } else {
+            LinearProgressIndicator(
+                progress = { progressFraction.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         Text(progressLabel, style = MaterialTheme.typography.titleMedium)
         if (!currentValue.isNullOrBlank()) {
             OutlinedCard(modifier = Modifier.fillMaxWidth()) {

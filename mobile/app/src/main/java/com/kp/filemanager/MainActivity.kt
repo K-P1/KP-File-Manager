@@ -1,7 +1,8 @@
-/** mobile/app/src/main/java/com/kp/filemanager/MainActivity.kt: Creates the media-operation repository and renders the existing Compose application; wired to the refactored core. */
+/** mobile/app/src/main/java/com/kp/filemanager/MainActivity.kt: Creates the optimized media repository with debug-only instrumentation and renders the Compose application; updated for pipeline telemetry. */
 package com.kp.filemanager
 
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
         DefaultFileOperationRepository(
             gateway = SafDocumentGateway(this),
             logStore = OperationLogStore(this),
+            debugLoggingEnabled = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
         )
     }
     private val viewModel: FileManagerViewModel by viewModels {

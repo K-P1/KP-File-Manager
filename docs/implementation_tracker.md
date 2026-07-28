@@ -1,6 +1,6 @@
 # Mobile Refactor Implementation Tracker
 
-Last updated: 2026-07-27
+Last updated: 2026-07-28
 
 Status values: `Pending`, `In progress`, `Complete`, `Deferred`.
 
@@ -21,6 +21,7 @@ Status values: `Pending`, `In progress`, `Complete`, `Deferred`.
 | Add comprehensive automated tests | Complete | 27 unit tests pass across parser, scanner, matching, formatting, planning, conflict resolution, idempotency, retained tools, execution, partial failure, and undo. |
 | Run Android verification | Complete | `mobile/run_checks.bat` passes unit tests, Android lint, and debug APK assembly. |
 | UI/UX redesign from `docs/UI.md` | Complete | Implemented the Android design foundation, adaptive phone/tablet navigation, full organizer state flow, review search/tabs/filters/sort, safe confirmation/conflict/undo flows, inline file-tool previews, settings, semantic states, and verified light/dark theming. |
+| Optimize the mobile media workflow | Complete | Replaced repeated parsing/scanning with one reusable index, context-aware planning, cached SAF paths, same-provider moves with verified streaming fallback, exact progress/ETA, safe cleanup, and debug-only phase/provider metrics. |
 
 ## Implementation Log
 
@@ -67,3 +68,12 @@ Status values: `Pending`, `In progress`, `Complete`, `Deferred`.
 - Decision: apply/undo progress remains indeterminate because the verified executor exposes only a final result and no trustworthy per-operation callback; the UI deliberately avoids fake percentages and remains responsive while work runs.
 - Decision: the local check helper prefers Android Studio's bundled JBR when present so an unrelated global JDK version cannot prevent Gradle from starting; environments without Android Studio retain their configured `JAVA_HOME`.
 - Attention: native file mutation behavior still needs a physical-device pass across the document providers intended for release, as provider capabilities vary. The UI and state integration did not alter the executor or filesystem safety rules.
+
+### 2026-07-28 — Indexed mobile media workflow optimization
+
+- Changed: introduced a single-scan `MediaIndex`, cached parsed metadata and lookup maps, context-aware library planning, targeted external-destination checks, cached destination directories, serialized same-provider move/rename with authority-level capability caching, verified direct-to-final copy/delete fallback, bottom-up empty-folder cleanup with undo path recreation, one immutable phased progress model with ETA, and debug-only timing/provider counters.
+- Why: remove repeated provider traversal, repeated parsing, redundant `TV Shows/<series>` nesting, copy-heavy move behavior, indeterminate apply feedback, and leftover empty source folders without weakening collision or undo safety.
+- Files: `mobile/app/src/main/java/com/kp/filemanager/domain/`, `mobile/app/src/main/java/com/kp/filemanager/data/`, organizer ViewModel/state/Compose progress UI, focused Android unit tests, and this tracker.
+- Checks: regression tests were written and observed failing before implementation; 46/46 unit tests pass; `mobile/run_checks.bat` passes Android lint and debug APK assembly; `git diff --check` passes.
+- Measured: source discovery is one recursive scan instead of up to two full-tree scans; the two-item regression fixture parses each item once (two parses instead of the former three, where the video was parsed during both scanning and grouping); repeated path/name resolution now reuses one projected child query per uncached directory instead of issuing another child query plus an extra document query for each matched entry.
+- Attention: native move/rename behavior still requires physical-device coverage for release providers. Unsupported direct move is cached per authority and safely falls back, but Android provider implementations remain outside the app's control.

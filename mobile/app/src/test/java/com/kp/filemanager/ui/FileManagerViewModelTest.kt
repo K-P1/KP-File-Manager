@@ -1,11 +1,12 @@
-/** mobile/app/src/test/java/com/kp/filemanager/ui/FileManagerViewModelTest.kt: Verifies persisted organization defaults are initialized and emitted by the ViewModel; created for the UI refactor. */
+/** mobile/app/src/test/java/com/kp/filemanager/ui/FileManagerViewModelTest.kt: Verifies persisted organization defaults and the optimized repository contract; updated for pipeline progress. */
 package com.kp.filemanager.ui
 
 import com.kp.filemanager.data.FileOperationRepository
 import com.kp.filemanager.domain.OperationPlan
 import com.kp.filemanager.domain.OperationRequest
 import com.kp.filemanager.domain.OperationResult
-import com.kp.filemanager.domain.ScanProgress
+import com.kp.filemanager.domain.OrganizationProgress
+import com.kp.filemanager.domain.LibraryContextType
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -40,16 +41,24 @@ class FileManagerViewModelTest {
     private object FakeRepository : FileOperationRepository {
         override suspend fun preview(
             request: OperationRequest,
-            onScanProgress: (ScanProgress) -> Unit,
+            onProgress: (OrganizationProgress) -> Unit,
         ) = Result.success(OperationResult(OperationPlan(request.sourceTreeUri, emptyList())))
 
-        override suspend fun execute(plan: OperationPlan) =
+        override suspend fun execute(
+            plan: OperationPlan,
+            onProgress: (OrganizationProgress) -> Unit,
+        ) =
             Result.success(OperationResult(plan))
 
         override suspend fun undoLast() =
             Result.success(OperationResult(OperationPlan("", emptyList())))
 
-        override fun folderName(treeUri: String) = "Folder"
+        override suspend fun resolveLibraryContext(
+            plan: OperationPlan,
+            contextType: LibraryContextType,
+        ) = Result.success(OperationResult(plan))
+
+        override suspend fun folderName(treeUri: String) = "Folder"
         override fun canUndo() = false
     }
 }

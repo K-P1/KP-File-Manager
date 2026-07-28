@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt: Produces deterministic media and filename-tool plans with centralized conflict detection; refactored for movie and TV organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt: Produces complete deterministic context-aware plans from a reusable media index; optimized for one-pass organization. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
@@ -16,8 +16,55 @@ class MediaOrganizationPlanner(
         tvFolderName: String = "TV Shows",
         scanWarnings: List<ScanWarning> = emptyList(),
     ): OperationPlan {
-        val grouping = grouper.group(files)
+        val parser = MediaNameParser()
+        val index = MediaIndex(
+            root = DocumentEntry(destinationTreeUri, "", "Selected folder", true, 0),
+            directories = emptyList(),
+            items = files.map { IndexedMediaFile(it, parser.parse(it)) },
+        )
+        return plan(
+            index = index,
+            destinationTreeUri = destinationTreeUri,
+            existingDestinationPaths = existingDestinationPaths,
+            sourceAndDestinationAreSame = sourceAndDestinationAreSame,
+            movieFolderName = movieFolderName,
+            tvFolderName = tvFolderName,
+            scanWarnings = scanWarnings,
+            libraryContext = LibraryContext(
+                LibraryContextType.GENERIC_SOURCE,
+                selectedRootName = index.root.name,
+            ),
+        )
+    }
+
+    fun plan(
+        index: MediaIndex,
+        destinationTreeUri: String,
+        existingDestinationPaths: Set<String>,
+        sourceAndDestinationAreSame: Boolean,
+        movieFolderName: String = "Movies",
+        tvFolderName: String = "TV Shows",
+        scanWarnings: List<ScanWarning> = emptyList(),
+        libraryContext: LibraryContext = LibraryContextResolver().resolve(
+            index,
+            movieFolderName,
+            tvFolderName,
+        ),
+        progressReporter: ProgressReporter? = null,
+    ): OperationPlan {
+        progressReporter?.begin(OrganizationPhase.MATCHING_TITLES, index.items.size)
+        val grouping = grouper.group(index)
+        index.items.forEach { progressReporter?.completePhaseItem(it.file.fileName) }
+        progressReporter?.begin(OrganizationPhase.PLANNING, index.items.size)
         val operations = mutableListOf<PlannedFileOperation>()
+        val contextConflict = if (libraryContext.type == LibraryContextType.AMBIGUOUS) {
+            OperationConflict(
+                ConflictType.AMBIGUOUS_LIBRARY_CONTEXT,
+                "Choose whether the selected folder is a generic source, Movies library, or TV library.",
+            )
+        } else {
+            null
+        }
 
         grouping.groups.forEach { group ->
             val duplicateVideoConflict = if (group.videos.size > 1) {
@@ -34,8 +81,9 @@ class MediaOrganizationPlanner(
                     groupedFile = groupedFile,
                     movieFolderName = movieFolderName,
                     tvFolderName = tvFolderName,
+                    libraryContext = libraryContext,
                 )
-                val conflicts = listOfNotNull(duplicateVideoConflict)
+                val conflicts = listOfNotNull(duplicateVideoConflict, contextConflict)
                 operations += operationFor(
                     file = groupedFile.file,
                     destinationTreeUri = destinationTreeUri,
@@ -74,13 +122,40 @@ class MediaOrganizationPlanner(
             existingDestinationPaths = existingDestinationPaths,
             sourceAndDestinationAreSame = sourceAndDestinationAreSame,
         )
+        val sortedOperations = withConflicts.sortedWith(
+            compareBy({ it.destinationPath.lowercase(Locale.ROOT) }, { it.sourcePath }),
+        )
+        index.items.forEach { progressReporter?.completePhaseItem(it.file.fileName) }
+        val protectedDestinationPaths = sortedOperations
+            .asSequence()
+            .filter { it.operationType != OperationType.SKIP }
+            .map(PlannedFileOperation::destinationDirectoryPath)
+            .filter(String::isNotBlank)
+            .flatMap { path ->
+                val segments = path.replace('\\', '/').trim('/').split('/').filter(String::isNotBlank)
+                segments.indices.asSequence().map { index ->
+                    segments.take(index + 1).joinToString("/").lowercase(Locale.ROOT)
+                }
+            }
+            .toSet()
+        val protectedDirectoryUris = buildSet {
+            add(index.root.uri)
+            index.directories
+                .filter { it.path.replace('\\', '/').trim('/').lowercase(Locale.ROOT) in protectedDestinationPaths }
+                .mapTo(this, IndexedDirectory::uri)
+        }
         return OperationPlan(
             destinationTreeUri = destinationTreeUri,
-            operations = withConflicts.sortedWith(compareBy({ it.destinationPath.lowercase(Locale.ROOT) }, { it.sourcePath })),
+            operations = sortedOperations,
             groups = grouping.groups,
             scanWarnings = scanWarnings,
             existingDestinationPaths = existingDestinationPaths,
             sourceAndDestinationAreSame = sourceAndDestinationAreSame,
+            mediaIndex = index,
+            libraryContext = libraryContext,
+            protectedDirectoryUris = protectedDirectoryUris,
+            movieFolderName = movieFolderName,
+            tvFolderName = tvFolderName,
         )
     }
 

@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/MediaPathFormatter.kt: Centralizes safe movie, TV, subtitle, artwork, and metadata destination names; created for the media refactor. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/MediaPathFormatter.kt: Centralizes safe context-aware movie, TV, subtitle, artwork, and metadata destinations; optimized to avoid redundant library nesting. */
 package com.kp.filemanager.domain
 
 class MediaPathFormatter {
@@ -7,6 +7,10 @@ class MediaPathFormatter {
         groupedFile: GroupedFile,
         movieFolderName: String = "Movies",
         tvFolderName: String = "TV Shows",
+        libraryContext: LibraryContext = LibraryContext(
+            LibraryContextType.GENERIC_SOURCE,
+            selectedRootName = "",
+        ),
     ): String {
         val item = group.mediaItem
         val extension = groupedFile.file.extension
@@ -21,7 +25,14 @@ class MediaPathFormatter {
                     MediaFileType.METADATA -> "Movie.nfo"
                     MediaFileType.UNKNOWN -> groupedFile.file.fileName
                 }
-                "${sanitizeSegment(movieFolderName)}/${sanitizeSegment(baseName)}/${sanitizeSegment(fileName)}"
+                val directory = when (libraryContext.type) {
+                    LibraryContextType.MOVIES_LIBRARY_ROOT -> sanitizeSegment(baseName)
+                    LibraryContextType.MOVIE_FOLDER -> ""
+                    else -> "${sanitizeSegment(movieFolderName)}/${sanitizeSegment(baseName)}"
+                }
+                listOf(directory, sanitizeSegment(fileName))
+                    .filter(String::isNotBlank)
+                    .joinToString("/")
             }
             is MediaItem.TvEpisode -> {
                 val seriesTitle = sanitizeSegment(item.title)
@@ -41,8 +52,17 @@ class MediaPathFormatter {
                     MediaFileType.SUBTITLE -> "$episodeBase$suffix.$extension"
                     else -> groupedFile.file.fileName
                 }
-                "${sanitizeSegment(tvFolderName)}/$seriesTitle/Season " +
-                    "${item.season.toString().padStart(2, '0')}/${sanitizeSegment(fileName)}"
+                val seasonDirectory = "Season ${item.season.toString().padStart(2, '0')}"
+                val directory = when (libraryContext.type) {
+                    LibraryContextType.TV_LIBRARY_ROOT -> "$seriesTitle/$seasonDirectory"
+                    LibraryContextType.SERIES_FOLDER -> {
+                        if (libraryContext.selectedRootIsSeason) "" else seasonDirectory
+                    }
+                    else -> "${sanitizeSegment(tvFolderName)}/$seriesTitle/$seasonDirectory"
+                }
+                listOf(directory, sanitizeSegment(fileName))
+                    .filter(String::isNotBlank)
+                    .joinToString("/")
             }
         }
     }

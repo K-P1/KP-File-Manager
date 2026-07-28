@@ -31,3 +31,11 @@
 - Files: `desktop/src/kp_file_manager/gui_qt.py`, `mobile/app/src/main/java/com/kp/filemanager/ui/`, `mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt`.
 - Checks: `desktop/run_checks.bat` passed 3/3 tests. `mobile/run_checks.bat` passed unit tests, lint, and debug assembly when run with Android Studio JDK (the shell’s JDK 25 is unsupported by this Gradle/Kotlin combination).
 - Attention: desktop progress is indeterminate because the existing file engines do not expose per-item progress callbacks. Android displays the system picker’s opaque SAF URI as the granted folder location because Android does not provide a filesystem path for a document tree.
+
+## 2026-07-28 — Android indexed media workflow optimization
+
+- Changed: refactored organizer discovery, parsing, context resolution, planning, SAF execution, progress, metrics, cleanup, and undo around one retained `MediaIndex`; direct same-provider moves are preferred and copy/delete now streams only to the verified final destination.
+- Why: reduce provider queries and repeated parsing, prevent redundant library nesting, expose trustworthy phase/count/ETA feedback, and safely remove empty source folders after successful relocation.
+- Files: Android domain/data pipeline, organizer ViewModel/state/Compose progress UI, focused regression tests, and `docs/implementation_tracker.md`.
+- Checks: 46/46 unit tests passed; `mobile/run_checks.bat` passed lint and debug assembly; `git diff --check` passed.
+- Attention: real provider move/rename behavior still needs a physical-device matrix; unsupported authority capabilities are cached and use the verified fallback.

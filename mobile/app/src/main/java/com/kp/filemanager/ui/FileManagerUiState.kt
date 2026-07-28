@@ -1,10 +1,10 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerUiState.kt: Models core workflow inputs, scan progress, immutable plans, execution results, and session undo availability; refactored for media organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerUiState.kt: Models workflow inputs, one immutable pipeline progress state, retained plans, results, and undo availability; optimized for media organization. */
 package com.kp.filemanager.ui
 
 import com.kp.filemanager.domain.OperationMode
 import com.kp.filemanager.domain.OperationPlan
+import com.kp.filemanager.domain.OrganizationProgress
 import com.kp.filemanager.domain.PlannedFileOperation
-import com.kp.filemanager.domain.ScanProgress
 
 enum class OrganizerWorkflowState {
     IDLE,
@@ -46,7 +46,7 @@ data class FileManagerUiState(
     val keyword: String = "",
     val replacement: String = "",
     val workflowState: OrganizerWorkflowState = OrganizerWorkflowState.IDLE,
-    val scanProgress: ScanProgress = ScanProgress(),
+    val organizationProgress: OrganizationProgress = OrganizationProgress(),
     val activePlan: OperationPlan? = null,
     val isWorking: Boolean = false,
     val progressText: String = "",

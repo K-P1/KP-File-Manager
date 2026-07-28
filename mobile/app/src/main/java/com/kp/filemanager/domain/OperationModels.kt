@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines media discovery, parsing, planning, execution, and retained tool contracts; refactored for movie and TV organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines indexed media discovery, context-aware planning, progress, execution, and retained tool contracts; optimized for one-pass organization. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
@@ -36,6 +36,10 @@ data class ScannedFile(
     val depth: Int,
     val size: Long,
     val fileType: MediaFileType,
+    val mimeType: String = "",
+    val lastModified: Long = 0,
+    val flags: Int = 0,
+    val documentId: String = "",
 ) {
     companion object {
         fun from(
@@ -46,6 +50,10 @@ data class ScannedFile(
             depth: Int,
             size: Long,
             fileType: MediaFileType = MediaFileClassifier.classify(fileName),
+            mimeType: String = "",
+            lastModified: Long = 0,
+            flags: Int = 0,
+            documentId: String = "",
         ): ScannedFile {
             val cleanParent = parentPath.trim('/')
             val sourcePath = listOf(cleanParent, fileName).filter(String::isNotBlank).joinToString("/")
@@ -60,6 +68,10 @@ data class ScannedFile(
                 depth = depth,
                 size = size,
                 fileType = fileType,
+                mimeType = mimeType,
+                lastModified = lastModified,
+                flags = flags,
+                documentId = documentId,
             )
         }
     }
@@ -121,6 +133,58 @@ data class GroupingResult(
     val ambiguous: Map<GroupedFile, List<OrganizationGroup>>,
 )
 
+data class IndexedDirectory(
+    val uri: String,
+    val parentUri: String,
+    val path: String,
+    val name: String,
+    val depth: Int,
+    val documentId: String = "",
+    val lastModified: Long = 0,
+    val flags: Int = 0,
+)
+
+data class IndexedMediaFile(
+    val file: ScannedFile,
+    val parsedName: ParsedMediaName,
+)
+
+data class MediaIndex(
+    val root: DocumentEntry,
+    val directories: List<IndexedDirectory>,
+    val items: List<IndexedMediaFile>,
+    val treeUri: String = root.uri,
+) {
+    val files: List<ScannedFile> = items.map(IndexedMediaFile::file)
+    val parsedBySourceUri: Map<String, ParsedMediaName> =
+        items.associate { it.file.sourceUri to it.parsedName }
+    val filesByParentUri: Map<String, List<IndexedMediaFile>> =
+        items.groupBy { it.file.parentUri }
+    val directoriesByPath: Map<String, IndexedDirectory> =
+        directories.associateBy { normalizePath(it.path) }
+
+    companion object {
+        private fun normalizePath(path: String): String =
+            path.replace('\\', '/').trim('/').lowercase(Locale.ROOT)
+    }
+}
+
+enum class LibraryContextType {
+    MOVIES_LIBRARY_ROOT,
+    TV_LIBRARY_ROOT,
+    MOVIE_FOLDER,
+    SERIES_FOLDER,
+    GENERIC_SOURCE,
+    AMBIGUOUS,
+}
+
+data class LibraryContext(
+    val type: LibraryContextType,
+    val selectedRootName: String,
+    val selectedRootIsSeason: Boolean = false,
+    val reason: String = "",
+)
+
 enum class OperationType {
     MOVE,
     RENAME,
@@ -150,6 +214,7 @@ enum class ConflictType {
     CASE_ONLY_COLLISION,
     SOURCE_MISSING,
     PLAN_INVALIDATED,
+    AMBIGUOUS_LIBRARY_CONTEXT,
 }
 
 data class OperationConflict(
@@ -192,6 +257,7 @@ data class ScanWarning(
 
 data class ScanProgress(
     val filesScanned: Int = 0,
+    val directoriesScanned: Int = 0,
     val moviesDetected: Int = 0,
     val episodesDetected: Int = 0,
     val subtitlesDetected: Int = 0,
@@ -199,9 +265,62 @@ data class ScanProgress(
 )
 
 data class ScanResult(
-    val files: List<ScannedFile>,
+    val index: MediaIndex,
     val warnings: List<ScanWarning> = emptyList(),
     val ignoredDirectoryCount: Int = 0,
+) {
+    val files: List<ScannedFile>
+        get() = index.files
+}
+
+enum class OrganizationPhase(val label: String) {
+    IDLE("Ready"),
+    SCANNING("Scanning"),
+    MATCHING_TITLES("Matching Titles"),
+    PLANNING("Planning"),
+    ORGANIZING_FILES("Organizing Files"),
+    RENAMING("Renaming"),
+    CLEANING_UP("Cleaning Up"),
+    COMPLETE("Complete"),
+}
+
+data class OrganizationProgress(
+    val phase: OrganizationPhase = OrganizationPhase.IDLE,
+    val isIndeterminate: Boolean = true,
+    val processedItems: Int = 0,
+    val totalItems: Int = 0,
+    val remainingItems: Int = 0,
+    val percent: Int? = null,
+    val currentItem: String = "",
+    val filesDiscovered: Int = 0,
+    val directoriesDiscovered: Int = 0,
+    val moviesDetected: Int = 0,
+    val episodesDetected: Int = 0,
+    val subtitlesDetected: Int = 0,
+    val movedCount: Int = 0,
+    val renamedCount: Int = 0,
+    val skippedCount: Int = 0,
+    val failedCount: Int = 0,
+    val cleanedFolderCount: Int = 0,
+    val etaMillis: Long? = null,
+    val startedAtMillis: Long? = null,
+)
+
+data class ProviderOperationCounters(
+    val queries: Int = 0,
+    val moves: Int = 0,
+    val renames: Int = 0,
+    val copyDeleteFallbacks: Int = 0,
+)
+
+data class PerformanceMetrics(
+    val scanDurationMillis: Long = 0,
+    val matchingPlanningDurationMillis: Long = 0,
+    val organizationDurationMillis: Long = 0,
+    val cleanupDurationMillis: Long = 0,
+    val providerOperations: ProviderOperationCounters = ProviderOperationCounters(),
+    val failedOperations: Int = 0,
+    val skippedOperations: Int = 0,
 )
 
 data class OperationPlan(
@@ -211,6 +330,12 @@ data class OperationPlan(
     val scanWarnings: List<ScanWarning> = emptyList(),
     val existingDestinationPaths: Set<String> = emptySet(),
     val sourceAndDestinationAreSame: Boolean = false,
+    val mediaIndex: MediaIndex? = null,
+    val libraryContext: LibraryContext? = null,
+    val protectedDirectoryUris: Set<String> = emptySet(),
+    val performanceMetrics: PerformanceMetrics = PerformanceMetrics(),
+    val movieFolderName: String = "Movies",
+    val tvFolderName: String = "TV Shows",
 ) {
     val hasBlockingConflicts: Boolean
         get() = operations.any(PlannedFileOperation::hasBlockingConflict)
@@ -268,6 +393,8 @@ data class OperationResult(
     val failedOperations: List<OperationFailure> = emptyList(),
     val skippedOperations: List<PlannedFileOperation> = emptyList(),
     val warnings: List<String> = emptyList(),
+    val cleanedDirectoryCount: Int = 0,
+    val performanceMetrics: PerformanceMetrics = PerformanceMetrics(),
 ) {
     val changes: List<PlannedFileOperation>
         get() = plan.operations

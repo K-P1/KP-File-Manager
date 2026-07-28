@@ -1,4 +1,4 @@
-/** mobile/app/src/test/java/com/kp/filemanager/data/OperationExecutorTest.kt: Verifies plan execution, revalidation, partial failure isolation, and reverse-order session undo; created for the media refactor. */
+/** mobile/app/src/test/java/com/kp/filemanager/data/OperationExecutorTest.kt: Verifies execution, shared-directory caching, failure isolation, and reverse-order undo; updated for pipeline optimization. */
 package com.kp.filemanager.data
 
 import com.kp.filemanager.domain.MediaFileType
@@ -73,6 +73,16 @@ class OperationExecutorTest {
         assertFalse(executor.canUndo())
     }
 
+    @Test
+    fun `executor resolves a shared destination directory only once`() {
+        val gateway = FakeMutationGateway(existingSources = mutableSetOf("source-a", "source-b"))
+        val executor = OperationExecutor(gateway)
+
+        executor.execute(plan(operation("source-a", "A.mkv"), operation("source-b", "B.mkv")))
+
+        assertEquals(listOf("Movies/A"), gateway.preparedDirectoryPaths)
+    }
+
     private fun operation(uri: String, newName: String) = PlannedFileOperation(
         sourceUri = uri,
         sourceParentUri = "root",
@@ -99,6 +109,7 @@ class OperationExecutorTest {
         val appliedSources = mutableListOf<String>()
         val undoneSources = mutableListOf<String>()
         val cleanedDirectories = mutableListOf<String>()
+        val preparedDirectoryPaths = mutableListOf<String>()
 
         override fun documentExists(uri: String) = uri in existingSources
 
@@ -107,8 +118,10 @@ class OperationExecutorTest {
         override fun destinationExists(treeUri: String, relativePath: String, excludingUri: String?) =
             relativePath in destinations
 
-        override fun ensureDirectoryPath(treeUri: String, relativePath: String) =
-            PreparedDirectory("prepared:$relativePath", listOf("created:$relativePath"))
+        override fun ensureDirectoryPath(treeUri: String, relativePath: String): PreparedDirectory {
+            preparedDirectoryPaths += relativePath
+            return PreparedDirectory("prepared:$relativePath", listOf("created:$relativePath"))
+        }
 
         override fun apply(operation: PlannedFileOperation, targetParentUri: String): DocumentMutation {
             if (operation.sourceUri in failOnApply) error("provider failure")

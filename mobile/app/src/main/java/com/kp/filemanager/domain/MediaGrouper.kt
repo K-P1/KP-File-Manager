@@ -1,13 +1,18 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/MediaGrouper.kt: Groups videos and safely matches subtitles, artwork, and metadata by parsed identity; created for the media refactor. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/MediaGrouper.kt: Groups indexed media using cached parsed identities and map-based companion matching; optimized for the one-pass pipeline. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
 
 class MediaGrouper(
-    private val parser: MediaNameParser = MediaNameParser(),
+    private val parser: MediaMetadataParser = MediaNameParser(),
 ) {
-    fun group(files: List<ScannedFile>): GroupingResult {
-        val parsedFiles = files.map { GroupedFile(it, parser.parse(it)) }
+    fun group(index: MediaIndex): GroupingResult =
+        groupParsed(index.items.map { GroupedFile(it.file, it.parsedName) })
+
+    fun group(files: List<ScannedFile>): GroupingResult =
+        groupParsed(files.map { GroupedFile(it, parser.parse(it)) })
+
+    private fun groupParsed(parsedFiles: List<GroupedFile>): GroupingResult {
         val videoGroups = parsedFiles
             .filter { it.file.fileType == MediaFileType.VIDEO }
             .mapNotNull { grouped -> identityOf(grouped.parsedName)?.let { it to grouped } }
@@ -27,12 +32,25 @@ class MediaGrouper(
             .filter { it.file.fileType == MediaFileType.VIDEO && identityOf(it.parsedName) == null }
             .toMutableList()
         val ambiguous = linkedMapOf<GroupedFile, List<OrganizationGroup>>()
+        val groupsByTitle = videoGroups.entries
+            .groupBy({ it.key.title }, { it.key to it.value })
+        val groupsByParentPath = videoGroups.values
+            .flatMap { group ->
+                group.files.map { it.file.parentPath.lowercase(Locale.ROOT) to group }
+            }
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, groups) -> groups.distinct() }
         parsedFiles.filter { it.file.fileType != MediaFileType.VIDEO }.forEach { companion ->
             if (companion.file.fileType == MediaFileType.UNKNOWN) {
                 unmatched += companion
                 return@forEach
             }
-            val candidates = matchingGroups(companion, videoGroups)
+            val candidates = matchingGroups(
+                companion = companion,
+                groups = videoGroups,
+                groupsByTitle = groupsByTitle,
+                groupsByParentPath = groupsByParentPath,
+            )
             when (candidates.size) {
                 0 -> unmatched += companion
                 1 -> candidates.single().files += companion
@@ -52,23 +70,24 @@ class MediaGrouper(
     private fun matchingGroups(
         companion: GroupedFile,
         groups: Map<MediaIdentity, MutableGroup>,
+        groupsByTitle: Map<String, List<Pair<MediaIdentity, MutableGroup>>>,
+        groupsByParentPath: Map<String, List<MutableGroup>>,
     ): List<MutableGroup> {
         identityOf(companion.parsedName)?.let { exact ->
             groups[exact]?.let { return listOf(it) }
         }
 
-        val sameTitle = groups.entries
+        val titleKey = companion.parsedName.normalizedTitle.lowercase(Locale.ROOT)
+        val sameTitle = groupsByTitle[titleKey]
+            .orEmpty()
             .filter { (identity, _) ->
-                identity.title == companion.parsedName.normalizedTitle.lowercase(Locale.ROOT) &&
-                    (companion.parsedName.year == null || identity.year == companion.parsedName.year)
+                companion.parsedName.year == null || identity.year == companion.parsedName.year
             }
-            .map(Map.Entry<MediaIdentity, MutableGroup>::value)
+            .map { it.second }
         if (sameTitle.size == 1) return sameTitle
         if (sameTitle.size > 1) return sameTitle
 
-        val sameDirectory = groups.values.filter { group ->
-            group.files.any { it.file.parentPath.equals(companion.file.parentPath, ignoreCase = true) }
-        }
+        val sameDirectory = groupsByParentPath[companion.file.parentPath.lowercase(Locale.ROOT)].orEmpty()
         return when (companion.file.fileType) {
             MediaFileType.SUBTITLE -> sameDirectory
             MediaFileType.ARTWORK ->
