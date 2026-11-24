@@ -1,15 +1,17 @@
 /**
  * Path: mobile/app/src/main/java/com/kp/filemanager/export/ProtectedExportModels.kt
  * Purpose: Strict source/destination rules and selection-ready KP organizer plans for protected media.
- * Last changed: 2026-11-23, introduce protected media exporting.
+ * Last changed: 2026-11-24, remove temporary preview models; retain validation for existing recovery records.
  */
 package com.kp.filemanager.export
 
+import com.kp.filemanager.domain.ConflictDetector
 import com.kp.filemanager.domain.Confidence
 import com.kp.filemanager.domain.DocumentEntry
 import com.kp.filemanager.domain.IndexedMediaFile
 import com.kp.filemanager.domain.LibraryContext
 import com.kp.filemanager.domain.LibraryContextType
+import com.kp.filemanager.domain.MediaFileClassifier
 import com.kp.filemanager.domain.MediaFileType
 import com.kp.filemanager.domain.MediaItem
 import com.kp.filemanager.domain.MediaNameParser
@@ -48,6 +50,25 @@ object ProtectedExportPaths {
         require(token.matches(Regex("[a-f0-9-]{36}")))
         require(destination.startsWith("$LIBRARY_ROOT/"))
         return "${destination.substringBeforeLast('/')}/.kp-export-$token.partial"
+    }
+}
+
+/** Compatibility validator for previously journaled reconstructed mappings only. */
+internal object LegacyMovieRecoveryMapping {
+    const val METHOD = "Unrecorded movie recovery"
+    const val MOVIES = "${ProtectedExportPaths.LIBRARY_ROOT}/Movies"
+
+    fun target(path: String): String? {
+        if (!path.startsWith("$MOVIES/")) return null
+        val parts = path.removePrefix("$MOVIES/").split('/')
+        if (parts.any { it.isBlank() || it.startsWith('.') || it.any { c -> c == '\\' || c.isISOControl() } }) return null
+        val name = parts.last()
+        val root = when (MediaFileClassifier.classify(name)) {
+            MediaFileType.VIDEO -> ProtectedExportPaths.VIDEO_SOURCE
+            MediaFileType.SUBTITLE -> ProtectedExportPaths.SUBTITLE_SOURCE
+            else -> return null
+        }
+        return "$root/$name"
     }
 }
 
@@ -96,8 +117,19 @@ class ProtectedExportPlanner(
             libraryContext = LibraryContext(LibraryContextType.GENERIC_SOURCE, "Protected downloads"),
             sourceTreeUri = root.uri,
         )
+        return previewFor(plan, files.associate { it.sourceUri to it.size }, files.size)
+    }
+
+    fun withOccupiedTargets(preview: ExportPreview, existingPaths: Set<String>): ExportPreview {
+        if (existingPaths.isEmpty()) return preview
+        val plan = preview.plan.copy(operations = ConflictDetector.detect(preview.plan.operations, existingPaths,
+            sourceAndDestinationAreSame = false, sourceTreeUri = preview.plan.sourceTreeUri),
+            existingDestinationPaths = existingPaths)
+        return previewFor(plan, preview.sizes, preview.sourceCount)
+    }
+
+    private fun previewFor(plan: OperationPlan, sizes: Map<String, Long>, sourceCount: Int): ExportPreview {
         val operations = plan.operations.associateBy { it.sourceUri }
-        val sizes = files.associate { it.sourceUri to it.size }
         val bundles = plan.groups.mapNotNull { group ->
             val video = group.videos.firstOrNull() ?: return@mapNotNull null
             val matchingOperations = group.files.mapNotNull { operations[it.file.sourceUri] }
@@ -128,14 +160,14 @@ class ProtectedExportPlanner(
             bundles = bundles.sortedWith(compareBy({ it.detail }, { it.label.lowercase(Locale.ROOT) })),
             unmatched = plan.operations.filter { it.sourceUri !in groupedIds },
             sizes = sizes,
-            sourceCount = files.size,
+            sourceCount = sourceCount,
         )
     }
 }
 
 enum class ExportStage(val label: String) {
     IDLE("Ready"), CHECKING("Checking Shizuku"), SCANNING("Scanning protected folders"),
-    PLANNING("Matching and organizing"), COPYING("Copying media"), VERIFYING("Verifying integrity"),
+    PLANNING("Matching and organizing"), MOVING("Moving media"), COPYING("Copying media"), VERIFYING("Verifying integrity"),
     PUBLISHING("Publishing to media library"), CLEANING("Cleaning original files"),
     RESTORING("Restoring original files"), COMPLETE("Finished"), ERROR("Action needed"),
 }
@@ -149,9 +181,13 @@ data class ExportProgress(
     val totalBytes: Long = 0,
     val currentCopiedBytes: Long = 0,
     val message: String = "",
+    val currentFileBytes: Long = 0,
 ) {
-    val fraction: Float? get() = totalBytes.takeIf { it > 0L }?.let {
-        ((completedBytes + currentCopiedBytes).toDouble() / it).toFloat().coerceIn(0f, 1f)
+    // Overall completion measures committed files, not bytes merely written to staging.
+    val fraction: Float? get() = when {
+        totalBytes > 0L -> (completedBytes.toDouble() / totalBytes).toFloat().coerceIn(0f, 1f)
+        totalFiles > 0 -> (completedFiles.toFloat() / totalFiles).coerceIn(0f, 1f)
+        else -> null
     }
     val percent: Int? get() = fraction?.times(100)?.toInt()
 }

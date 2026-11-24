@@ -1,7 +1,7 @@
 /**
  * Path: mobile/app/src/test/java/com/kp/filemanager/export/ProtectedExportPlannerTest.kt
  * Purpose: Regression tests for cross-folder subtitle matching, KP output names and fail-closed conflicts.
- * Last changed: 2026-11-23, add protected export coverage.
+ * Last changed: 2026-11-24, test occupied-target application without reparsing media.
  */
 package com.kp.filemanager.export
 
@@ -81,5 +81,16 @@ class ProtectedExportPlannerTest {
         assertTrue(runCatching { ProtectedExportPaths.destination("Movies/../trick.mkv") }.isFailure)
         assertTrue(runCatching { ProtectedExportPaths.destination("Downloads/Movies/Title.mkv") }.isFailure)
         assertTrue(runCatching { ProtectedExportPaths.destination("TV Shows/Show/../../bad") }.isFailure)
+    }
+    @Test fun reusedPreviewMatchesFullCollisionPlan() {
+        val files = listOf(video("Arrival.2016.mkv"), subtitle("Arrival.2016.eng.srt"))
+        val planner = ProtectedExportPlanner()
+        val occupied = "${ProtectedExportPaths.LIBRARY_ID}\u0000Movies/Arrival (2016)/Arrival (2016).mkv"
+        val preliminary = planner.build(files)
+        val reused = planner.withOccupiedTargets(preliminary, setOf(occupied))
+        val rebuilt = planner.build(files, setOf(occupied))
+        assertEquals(rebuilt.plan.operations, reused.plan.operations)
+        assertEquals(rebuilt.bundles, reused.bundles)
+        assertTrue(reused.bundles.single().blocked)
     }
 }

@@ -1,7 +1,7 @@
 /**
  * Path: mobile/app/src/main/java/com/kp/filemanager/export/ProtectedExportViewModel.kt
  * Purpose: Lifecycle-safe selection, permission, scan, transfer, cancel, restore and progress state.
- * Last changed: 2026-11-24, align permission guidance with the authorization-only check.
+ * Last changed: 2026-11-24, describe direct path-based undo.
  */
 package com.kp.filemanager.export
 
@@ -10,6 +10,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +30,7 @@ data class ProtectedExportUiState(
     val error: String? = null,
     val result: ExportOutcome? = null,
     val canUndo: Boolean = false,
+    val history: List<ExportSession> = emptyList(),
 ) {
     val selectedBundles: List<ExportBundle>
         get() = preview?.bundles.orEmpty().filter { it.id in selectedIds && !it.blocked }
@@ -40,6 +43,7 @@ class ProtectedExportViewModel(private val repository: ProtectedExportRepository
     private val state = MutableStateFlow(ProtectedExportUiState())
     val uiState: StateFlow<ProtectedExportUiState> = state.asStateFlow()
     private var task: Job? = null
+    private var historyTask: Job? = null
     private val permissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, _ ->
         if (requestCode == PERMISSION_REQUEST_CODE) refreshAccess()
     }
@@ -58,8 +62,18 @@ class ProtectedExportViewModel(private val repository: ProtectedExportRepository
     fun refreshAccess() {
         val running = repository.shell.isRunning()
         val authorized = running && repository.shell.isAuthorized()
-        state.update { it.copy(shizukuRunning = running, shizukuAuthorized = authorized,
-            canUndo = runCatching { repository.hasUndo() }.getOrDefault(false)) }
+        state.update { it.copy(shizukuRunning = running, shizukuAuthorized = authorized) }
+        historyTask?.cancel()
+        historyTask = viewModelScope.launch {
+            try {
+                val history = withContext(Dispatchers.IO) { repository.history() }
+                state.update { it.copy(history = history, canUndo = history.any { session -> session.undoable.isNotEmpty() }) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                state.update { it.copy(error = "Cannot read export history: ${error.message}", canUndo = false) }
+            }
+        }
     }
 
     fun requestAccess() {
@@ -141,7 +155,7 @@ class ProtectedExportViewModel(private val repository: ProtectedExportRepository
                     preview = null, selectedIds = emptySet(),
                 ) }
             } catch (error: CancellationException) {
-                state.update { it.copy(message = "Export stopped. Verified exports remain recoverable; scan again to refresh.") }
+                state.update { it.copy(message = "Export stopped. Review transfer history and recover interrupted files before retrying.") }
             } catch (error: Exception) {
                 state.update { it.copy(error = error.message ?: "Export failed. Original files were not intentionally replaced.") }
             } finally {
@@ -152,19 +166,26 @@ class ProtectedExportViewModel(private val repository: ProtectedExportRepository
         }
     }
 
-    fun restore() {
-        if (state.value.isWorking || task?.isActive == true || !state.value.canUndo) return
+    fun restore(sessionId: String? = null, recordIds: Set<String>? = null) = runRestore(sessionId, recordIds, recover = false)
+
+    fun recover() = runRestore(null, null, recover = true)
+
+    private fun runRestore(sessionId: String?, recordIds: Set<String>?, recover: Boolean) {
+        if (state.value.isWorking || task?.isActive == true || !state.value.shizukuAuthorized || (!recover && !state.value.canUndo)) return
         task = viewModelScope.launch {
             state.update { it.copy(isWorking = true, message = null, error = null, result = null,
-                progress = ExportProgress(ExportStage.RESTORING, message = "Restoring verified original files")) }
+                progress = ExportProgress(ExportStage.RESTORING, message = "Moving files back to recorded original paths")) }
             try {
                 runCatching { repository.startForegroundTransfer() }
-                val outcome = repository.undo { progress ->
+                val callback: (ExportProgress) -> Unit = { progress ->
                     state.update { it.copy(progress = progress) }
                     runCatching { repository.updateForegroundTransfer(progress) }
                 }
-                state.update { it.copy(result = outcome, message = if (outcome.failedBundles.isEmpty())
-                    "Originals restored successfully." else "Some originals could not be restored. Published copies were kept safely.",
+                val outcome = if (recover) repository.recover(callback) else repository.undo(sessionId, recordIds, callback)
+                state.update { it.copy(result = outcome, message = if (recover) {
+                    if (outcome.succeeded) "Interrupted transfers reconciled." else "Some interrupted transfers need manual attention."
+                } else if (outcome.failedBundles.isEmpty())
+                    "Originals restored successfully." else "Restore stopped at a failure. Remaining files were not attempted; review the recorded paths and recover any pending transfer before retrying.",
                     preview = null, selectedIds = emptySet()) }
             } catch (error: CancellationException) {
                 state.update { it.copy(message = "Restore stopped. Remaining copies stay available for retry.") }

@@ -1,7 +1,7 @@
 /**
  * Path: mobile/app/src/main/java/com/kp/filemanager/export/ProtectedExportScreen.kt
  * Purpose: Responsive Material 3 protected media export with selection, detailed previews and live byte progress.
- * Last changed: 2026-11-24, distinguish Shizuku authorization from verified folder access.
+ * Last changed: 2026-11-24, explain direct undo and allow retry of pending restores.
  */
 package com.kp.filemanager.export
 
@@ -66,6 +66,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.util.Locale
+import java.text.DateFormat
+import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,7 +79,9 @@ fun ProtectedExportScreen(
     var search by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf("All") }
     var confirmExport by rememberSaveable { mutableStateOf(false) }
-    var confirmRestore by rememberSaveable { mutableStateOf(false) }
+    var undoRequest by remember { mutableStateOf<UndoRequest?>(null) }
+    var confirmRecovery by rememberSaveable { mutableStateOf(false) }
+    var showHistory by rememberSaveable { mutableStateOf(false) }
     val bundles = remember(state.preview, search, filter) {
         val mediaType = if (filter == "Movies") "Movie" else "TV episode"
         state.preview?.bundles.orEmpty().filter {
@@ -134,6 +138,38 @@ fun ProtectedExportScreen(
                 }
                 if (state.isWorking) {
                     item { ProgressCard(state.progress, actions::cancel, contentWidth) }
+                }
+                item {
+                    OutlinedCard(modifier = contentWidth) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Export history", style = MaterialTheme.typography.titleMedium)
+                            val active = state.history.flatMap { it.undoable }
+                            Text("${state.history.size} sessions · ${active.size} undoable files · ${formatBytes(active.sumOf { it.size })}",
+                                style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { showHistory = !showHistory }) { Text(if (showHistory) "Hide history" else "View history") }
+                                if (state.canUndo) TextButton(onClick = {
+                                    state.history.firstOrNull { it.undoable.isNotEmpty() }?.let { session ->
+                                        undoRequest = UndoRequest(session.id, session.undoable.map { it.id }.toSet(), "latest export")
+                                    }
+                                }, enabled = state.shizukuAuthorized && !state.isWorking) { Text("Undo last export") }
+                            }
+                            if (state.history.any { it.hasPending }) {
+                                Text("Interrupted transfers need attention. Pending restores can be retried; existing files are not overwritten.", color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall)
+                                OutlinedButton(onClick = { confirmRecovery = true }, enabled = state.shizukuAuthorized && !state.isWorking) {
+                                    Text("Recover interrupted transfers")
+                                }
+                            }
+                        }
+                    }
+                }
+                if (showHistory) {
+                    if (state.history.isEmpty()) item { Text("No export history yet.", modifier = contentWidth) }
+                    items(state.history, key = { "history-${it.id}" }) { session ->
+                        HistoryCard(session, state.shizukuAuthorized && !state.isWorking,
+                            onUndo = { undoRequest = it }, modifier = contentWidth)
+                    }
                 }
                 if (!state.isWorking && state.shizukuAuthorized && state.preview == null) {
                     item {
@@ -215,7 +251,7 @@ fun ProtectedExportScreen(
                 }
                 item { Spacer(Modifier.height(8.dp)) }
             }
-            if (!state.isWorking && (state.preview != null || state.canUndo)) {
+            if (!state.isWorking && state.preview != null) {
                 Surface(tonalElevation = 3.dp, shadowElevation = 4.dp) {
                     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = horizontal, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -229,16 +265,6 @@ fun ProtectedExportScreen(
                             Button(onClick = { confirmExport = true }, enabled = state.canExport) {
                                 Text("Export selected")
                             }
-                        } else {
-                            Text("Restore previous exports", modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyMedium)
-                        }
-                        if (state.canUndo && state.preview == null) {
-                            OutlinedButton(onClick = { confirmRestore = true }, enabled = state.shizukuAuthorized) {
-                                Icon(Icons.Outlined.Restore, contentDescription = null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Restore")
-                            }
                         }
                     }
                 }
@@ -250,21 +276,81 @@ fun ProtectedExportScreen(
             onDismissRequest = { confirmExport = false },
             icon = { Icon(Icons.Outlined.Shield, contentDescription = null) },
             title = { Text("Export selected media?") },
-            text = { Text("${state.selectedFiles} video and subtitle files (${formatBytes(state.selectedBytes)}) will be copied, verified, and organized. Original files will be removed only after safe publishing. You can restore them from the recovery journal.") },
+            text = { Text("${state.selectedFiles} video and subtitle files (${formatBytes(state.selectedBytes)}) will be moved where supported, or copied and verified. Transfer history records every original path so you can undo selected files later.") },
             confirmButton = {
                 Button(onClick = { confirmExport = false; actions.export() }) { Text("Start export") }
             },
             dismissButton = { TextButton(onClick = { confirmExport = false }) { Text("Review") } },
         )
     }
-    if (confirmRestore) {
+    undoRequest?.let { request ->
+        val session = state.history.firstOrNull { it.id == request.sessionId }
+        val reconstructed = session?.undoable.orEmpty().any { it.id in request.ids && it.method == LegacyMovieRecoveryMapping.METHOD }
         AlertDialog(
-            onDismissRequest = { confirmRestore = false },
-            title = { Text("Restore originals?") },
-            text = { Text("Verified exported files will be copied back to MovieBox's protected folders. Existing or changed files will not be overwritten.") },
-            confirmButton = { Button(onClick = { confirmRestore = false; actions.restore() }) { Text("Restore files") } },
-            dismissButton = { TextButton(onClick = { confirmRestore = false }) { Text("Cancel") } },
+            onDismissRequest = { undoRequest = null },
+            title = { Text("Undo ${request.label}?") },
+            text = { Text("Restore ${request.ids.size} files to their ${if (reconstructed) "recorded recovery targets (not known original paths)" else "exact original paths"}. Existing original paths will not be overwritten. Undo moves the current file without checking metadata or comparing contents. Close MovieBox and continue only if these are the files you want to return.") },
+            confirmButton = { Button(onClick = { undoRequest = null; actions.restore(request.sessionId, request.ids) },
+                enabled = state.shizukuAuthorized && !state.isWorking) { Text("Restore files") } },
+            dismissButton = { TextButton(onClick = { undoRequest = null }) { Text("Cancel") } },
         )
+    }
+    if (confirmRecovery) {
+        AlertDialog(onDismissRequest = { confirmRecovery = false }, title = { Text("Recover interrupted transfers?") },
+            text = { Text("For interrupted restores, recovery uses recorded path visibility only. If only the original is visible, it marks the restore complete without verifying contents. Review both locations before confirming. Earlier export recovery still uses its recorded verification; old restore partials are retained for manual review.") },
+            confirmButton = { Button(onClick = { confirmRecovery = false; actions.recover() }, enabled = state.shizukuAuthorized && !state.isWorking) { Text("Recover") } },
+            dismissButton = { TextButton(onClick = { confirmRecovery = false }) { Text("Cancel") } })
+    }
+}
+
+private data class UndoRequest(val sessionId: String, val ids: Set<String>, val label: String)
+
+@Composable
+private fun HistoryCard(session: ExportSession, enabled: Boolean, onUndo: (UndoRequest) -> Unit, modifier: Modifier = Modifier) {
+    var expanded by rememberSaveable(session.id) { mutableStateOf(false) }
+    val undoable = session.undoable
+    val restored = session.records.count { it.status == ExportRecordStatus.RESTORED }
+    val pending = session.records.count { it.status.pending }
+    val date = if (session.startedAt == 0L) "Earlier exports (migrated)" else DateFormat.getDateTimeInstance().format(Date(session.startedAt))
+    OutlinedCard(modifier = modifier) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(date, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text("${session.records.map { it.groupId }.distinct().size} groups · ${session.records.size} files · ${formatBytes(session.records.sumOf { it.size })}",
+                style = MaterialTheme.typography.bodySmall)
+            Text("${session.records.count { it.status == ExportRecordStatus.EXPORTED }} exported · $restored restored · $pending pending · ${session.records.count { it.status == ExportRecordStatus.NOT_MOVED }} not moved",
+                style = MaterialTheme.typography.bodySmall)
+            if (session.startedAt > 0 && session.finishedAt >= session.startedAt) {
+                Text("Export duration: ${(session.finishedAt - session.startedAt) / 1000}s", style = MaterialTheme.typography.bodySmall)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Hide files" else "View files") }
+                if (undoable.isNotEmpty()) TextButton(onClick = { onUndo(UndoRequest(session.id, undoable.map { it.id }.toSet(), "session")) },
+                    enabled = enabled) { Text("Undo session") }
+            }
+            if (expanded) {
+                session.records.groupBy { it.groupId }.values.forEach { group ->
+                    HorizontalDivider()
+                    Text(group.first().groupLabel, style = MaterialTheme.typography.titleSmall)
+                    val groupUndo = group.filter { it in undoable }
+                    if (groupUndo.isNotEmpty()) TextButton(onClick = { onUndo(UndoRequest(session.id, groupUndo.map { it.id }.toSet(), "media group")) }, enabled = enabled) { Text("Undo media group") }
+                    group.forEach { record ->
+                        Text(record.destination.substringAfterLast('/'), fontWeight = FontWeight.Medium)
+                        Text("${record.status.label} · ${formatBytes(record.size)} · ${record.method}", style = MaterialTheme.typography.bodySmall)
+                        Text("${if (record.method == LegacyMovieRecoveryMapping.METHOD) "Recovery target" else "Original"}: ${record.source}", style = MaterialTheme.typography.bodySmall)
+                        Text("Exported to: ${record.destination}", style = MaterialTheme.typography.bodySmall)
+                        if (record.exportedAt > 0) Text("Exported: ${DateFormat.getDateTimeInstance().format(Date(record.exportedAt))}", style = MaterialTheme.typography.bodySmall)
+                        if (record.restoredAt > 0) Text("Restored: ${DateFormat.getDateTimeInstance().format(Date(record.restoredAt))}", style = MaterialTheme.typography.bodySmall)
+                        record.temporary?.let { Text("Temporary: $it", style = MaterialTheme.typography.bodySmall) }
+                        record.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        if (record in undoable) TextButton(onClick = { onUndo(UndoRequest(session.id, setOf(record.id), "file")) }, enabled = enabled) { Text("Undo file") }
+                    }
+                }
+                if (session.legacyTemporary.isNotEmpty()) {
+                    Text("Retained partials; review manually:", color = MaterialTheme.colorScheme.error)
+                    session.legacyTemporary.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        }
     }
 }
 
@@ -409,9 +495,13 @@ private fun ProgressCard(progress: ExportProgress, onCancel: () -> Unit, modifie
                     overflow = TextOverflow.Ellipsis)
             }
             if (progress.totalFiles > 0) {
-                Text("${progress.completedFiles} / ${progress.totalFiles} files  ·  " +
-                    "${formatBytes(progress.completedBytes + progress.currentCopiedBytes)} / ${formatBytes(progress.totalBytes)}",
+                Text("${progress.completedFiles} / ${progress.totalFiles} files completed · " +
+                    "${formatBytes(progress.completedBytes)} / ${formatBytes(progress.totalBytes)}",
                     style = MaterialTheme.typography.bodySmall)
+            }
+            if (progress.stage == ExportStage.COPYING && progress.currentFileBytes > 0) {
+                LinearProgressIndicator(progress = { (progress.currentCopiedBytes.toDouble() / progress.currentFileBytes).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                Text("Current copy: ${formatBytes(progress.currentCopiedBytes)} / ${formatBytes(progress.currentFileBytes)}", style = MaterialTheme.typography.bodySmall)
             }
             TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.End)) { Text("Stop safely") }
         }
@@ -425,14 +515,16 @@ private fun ResultCard(outcome: ExportOutcome, modifier: Modifier = Modifier) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(if (outcome.succeeded) Icons.Outlined.CheckCircle else Icons.Outlined.Info,
                     contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text("${outcome.exported} groups processed", style = MaterialTheme.typography.titleMedium)
+                val restored = outcome.destinations.any(ProtectedExportPaths::inProtectedSource)
+                Text(if (restored) "${outcome.exported} files restored" else "${outcome.exported} items processed", style = MaterialTheme.typography.titleMedium)
             }
             outcome.failedBundles.forEach { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error) }
             outcome.warnings.forEach { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (outcome.succeeded) Text("Files are available in the public Movies and TV Shows folders.",
-                style = MaterialTheme.typography.bodyMedium)
+            if (outcome.succeeded && outcome.destinations.isNotEmpty()) Text(
+                if (outcome.destinations.any(ProtectedExportPaths::inProtectedSource)) "Files returned to the protected MovieBox folders."
+                else "Files are available in the public Movies and TV Shows folders.", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

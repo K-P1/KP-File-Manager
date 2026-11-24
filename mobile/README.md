@@ -1,3 +1,9 @@
+<!--
+Path: mobile/README.md
+Purpose: Android setup, features and validation instructions.
+Last changed: 2026-11-24, update protected export performance and undo documentation.
+-->
+
 # KP File Manager for Android
 
 This is a native, single-activity Android app built with Kotlin and Jetpack Compose. Its regular file-manager features use the system Storage Access Framework without root or broad storage permission. The optional Protected Export feature uses the Shizuku companion service to access a restricted MovieBox download directory.
@@ -41,4 +47,4 @@ On Android 11 and newer, the system does not allow apps to select storage roots,
 
 ## Protected Media Export (Shizuku)
 
-The **Export** tab adds a protected-source MovieBox media exporter. It uses Shizuku for filesystem access and KP's existing media organization engine to sort selected movies, episodes and subtitles into public `Movies` and `TV Shows` folders. It provides file-by-file destination review, byte-based progress, verified copy-first transfer, collision protection, recovery journaling and restore. See [`../docs/PROTECTED_EXPORT.md`](../docs/PROTECTED_EXPORT.md) for paths, setup, safety details and test procedures.
+The **Export** tab adds a protected-source MovieBox media exporter. It uses Shizuku for filesystem access and KP's existing media organization engine to sort selected movies, episodes and subtitles into public `Movies` and `TV Shows` folders. It provides file-by-file destination review, separate copy and completion progress, metadata-only moves where supported, verified-copy fallback, collision protection, persistent history and selective restore. See [`../docs/PROTECTED_EXPORT.md`](../docs/PROTECTED_EXPORT.md) for paths, setup, safety details and test procedures.

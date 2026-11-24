@@ -1,3 +1,9 @@
+<!--
+Path: README.md
+Purpose: Workspace overview and operating instructions.
+Last changed: 2026-11-24, update protected export performance and undo documentation.
+-->
+
 # KP File Manager
 
 KP File Manager is a two-application workspace for organizing and renaming files:
@@ -222,4 +228,4 @@ The desktop script compiles the package and runs its regression suite without re
 
 Generated Python environments, Android/Gradle build output, local SDK configuration, and runtime logs are ignored by Git. Do not commit credentials, local storage URIs, APKs, or build artifacts.
 
-The Android app now includes a **Protected Export** tab for Shizuku-powered MovieBox video/subtitle exporting. It reuses KP's media planner to sort files into shared Movies and TV Shows libraries. See [protected export details](docs/PROTECTED_EXPORT.md).
+The Android app now includes a **Protected Export** tab for Shizuku-powered MovieBox video/subtitle exporting. It reuses KP's media planner to sort files into shared Movies and TV Shows libraries, with move-first transfers, verified-copy fallback and persistent selective undo. See [protected export details](docs/PROTECTED_EXPORT.md).

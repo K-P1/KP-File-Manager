@@ -1,3 +1,9 @@
+<!--
+Path: docs/FEATURES.md
+Purpose: Feature overview for the desktop and Android applications.
+Last changed: 2026-11-24, update protected export performance and undo documentation.
+-->
+
 # KP File Manager features
 
 KP File Manager helps organise and rename the files in a folder. It is available as a Windows desktop app and an Android app. The main workflow is the same on both: choose a folder, choose an operation, review the proposed changes, and then apply them.
@@ -114,4 +120,4 @@ Android 11 and newer do not allow the system picker to grant access to a storage
 
 ## Mobile: Protected Media Export
 
-The Export tab adds Shizuku-powered discovery of MovieBox's restricted video and subtitle folders. The selected files are normalized using the same KP media organizer as the normal SAF workflow, then safely exported into the device's shared Movies and TV Shows libraries. It includes a responsive selection/review interface, per-file transfer progress, verification, guarded source cleanup and crash-recovery restore. More information: [Protected Media Export](PROTECTED_EXPORT.md).
+The Export tab adds Shizuku-powered discovery of MovieBox's restricted video and subtitle folders. The selected files are normalized using the same KP media organizer as the normal SAF workflow, then safely exported into the device's shared Movies and TV Shows libraries. It includes a responsive selection/review interface, per-file transfer progress, metadata-only moves where supported, verified-copy fallback, guarded source cleanup, persistent history and selective crash-recovery undo. More information: [Protected Media Export](PROTECTED_EXPORT.md).
