@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt: Produces complete deterministic context-aware plans from a reusable media index; optimized for one-pass organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationPlanner.kt: Produces deterministic plans with optional direct Movies and TV library routing. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
@@ -15,6 +15,8 @@ class MediaOrganizationPlanner(
         movieFolderName: String = "Movies",
         tvFolderName: String = "TV Shows",
         scanWarnings: List<ScanWarning> = emptyList(),
+        movieLibraryTreeUri: String? = null,
+        tvLibraryTreeUri: String? = null,
     ): OperationPlan {
         val parser = MediaNameParser()
         val index = MediaIndex(
@@ -30,6 +32,9 @@ class MediaOrganizationPlanner(
             movieFolderName = movieFolderName,
             tvFolderName = tvFolderName,
             scanWarnings = scanWarnings,
+            movieLibraryTreeUri = movieLibraryTreeUri,
+            tvLibraryTreeUri = tvLibraryTreeUri,
+            sourceTreeUri = destinationTreeUri.takeIf { sourceAndDestinationAreSame },
             libraryContext = LibraryContext(
                 LibraryContextType.GENERIC_SOURCE,
                 selectedRootName = index.root.name,
@@ -51,13 +56,19 @@ class MediaOrganizationPlanner(
             tvFolderName,
         ),
         progressReporter: ProgressReporter? = null,
+        movieLibraryTreeUri: String? = null,
+        tvLibraryTreeUri: String? = null,
+        sourceTreeUri: String? = null,
     ): OperationPlan {
         progressReporter?.begin(OrganizationPhase.MATCHING_TITLES, index.items.size)
         val grouping = grouper.group(index)
         index.items.forEach { progressReporter?.completePhaseItem(it.file.fileName) }
         progressReporter?.begin(OrganizationPhase.PLANNING, index.items.size)
         val operations = mutableListOf<PlannedFileOperation>()
-        val contextConflict = if (libraryContext.type == LibraryContextType.AMBIGUOUS) {
+        val contextConflict = if (
+            libraryContext.type == LibraryContextType.AMBIGUOUS &&
+            (movieLibraryTreeUri == null || tvLibraryTreeUri == null)
+        ) {
             OperationConflict(
                 ConflictType.AMBIGUOUS_LIBRARY_CONTEXT,
                 "Choose whether the selected folder is a generic source, Movies library, or TV library.",
@@ -76,22 +87,37 @@ class MediaOrganizationPlanner(
                 null
             }
             group.files.forEach { groupedFile ->
+                val destinationTree = when (group.mediaItem) {
+                    is MediaItem.Movie -> movieLibraryTreeUri ?: destinationTreeUri
+                    is MediaItem.TvEpisode -> tvLibraryTreeUri ?: destinationTreeUri
+                }
+                val destinationContext = when {
+                    group.mediaItem is MediaItem.Movie && movieLibraryTreeUri != null ->
+                        libraryContext.copy(type = LibraryContextType.MOVIES_LIBRARY_ROOT)
+                    group.mediaItem is MediaItem.TvEpisode && tvLibraryTreeUri != null ->
+                        libraryContext.copy(type = LibraryContextType.TV_LIBRARY_ROOT)
+                    else -> libraryContext
+                }
                 val destinationPath = formatter.destinationPath(
                     group = group,
                     groupedFile = groupedFile,
                     movieFolderName = movieFolderName,
                     tvFolderName = tvFolderName,
-                    libraryContext = libraryContext,
+                    libraryContext = destinationContext,
                 )
                 val conflicts = listOfNotNull(duplicateVideoConflict, contextConflict)
                 operations += operationFor(
                     file = groupedFile.file,
-                    destinationTreeUri = destinationTreeUri,
+                    destinationTreeUri = destinationTree,
                     destinationPath = destinationPath,
                     reason = reasonFor(groupedFile.file.fileType),
                     conflicts = conflicts,
                     warnings = group.warnings + lowConfidenceWarning(group.mediaItem),
-                    sourceAndDestinationAreSame = sourceAndDestinationAreSame,
+                    sourceAndDestinationAreSame = if (sourceTreeUri != null) {
+                        destinationTree == sourceTreeUri
+                    } else {
+                        destinationTree == destinationTreeUri && sourceAndDestinationAreSame
+                    },
                 )
             }
         }
@@ -121,14 +147,22 @@ class MediaOrganizationPlanner(
             operations = operations,
             existingDestinationPaths = existingDestinationPaths,
             sourceAndDestinationAreSame = sourceAndDestinationAreSame,
+            sourceTreeUri = sourceTreeUri,
         )
         val sortedOperations = withConflicts.sortedWith(
-            compareBy({ it.destinationPath.lowercase(Locale.ROOT) }, { it.sourcePath }),
+            compareBy(
+                { it.destinationTreeUri.lowercase(Locale.ROOT) },
+                { it.destinationPath.lowercase(Locale.ROOT) },
+                { it.sourcePath },
+            ),
         )
         index.items.forEach { progressReporter?.completePhaseItem(it.file.fileName) }
         val protectedDestinationPaths = sortedOperations
             .asSequence()
-            .filter { it.operationType != OperationType.SKIP }
+            .filter {
+                it.operationType != OperationType.SKIP &&
+                    (sourceTreeUri == null || it.destinationTreeUri == sourceTreeUri)
+            }
             .map(PlannedFileOperation::destinationDirectoryPath)
             .filter(String::isNotBlank)
             .flatMap { path ->
@@ -156,6 +190,9 @@ class MediaOrganizationPlanner(
             protectedDirectoryUris = protectedDirectoryUris,
             movieFolderName = movieFolderName,
             tvFolderName = tvFolderName,
+            sourceTreeUri = sourceTreeUri.orEmpty(),
+            movieLibraryTreeUri = movieLibraryTreeUri,
+            tvLibraryTreeUri = tvLibraryTreeUri,
         )
     }
 
@@ -322,16 +359,17 @@ object ConflictDetector {
         operations: List<PlannedFileOperation>,
         existingDestinationPaths: Set<String>,
         sourceAndDestinationAreSame: Boolean,
+        sourceTreeUri: String? = null,
     ): List<PlannedFileOperation> {
         val existingByCaseFolded = existingDestinationPaths.groupBy(::caseFold)
         val duplicates = operations
             .filter { it.operationType != OperationType.SKIP }
-            .groupBy { caseFold(it.destinationPath) }
+            .groupBy(::destinationKey)
             .filterValues { it.size > 1 }
             .keys
         val duplicateVideoIdentities = operations
             .filter { it.operationType != OperationType.SKIP && it.mediaType == MediaFileType.VIDEO }
-            .groupBy { caseFold(it.destinationPath.substringBeforeLast('.', it.destinationPath)) }
+            .groupBy { destinationKey(it, it.destinationPath.substringBeforeLast('.', it.destinationPath)) }
             .filterValues { it.size > 1 }
             .keys
 
@@ -339,8 +377,10 @@ object ConflictDetector {
             if (operation.status in setOf(OperationStatus.SKIPPED, OperationStatus.UNCHANGED)) return@map operation
             val conflicts = operation.conflicts.toMutableList()
             val targetKey = caseFold(operation.destinationPath)
+            val qualifiedTargetKey = destinationKey(operation)
             val sourceKey = caseFold(operation.sourcePath)
-            val videoIdentityKey = caseFold(
+            val videoIdentityKey = destinationKey(
+                operation,
                 operation.destinationPath.substringBeforeLast('.', operation.destinationPath),
             )
             if (operation.mediaType == MediaFileType.VIDEO && videoIdentityKey in duplicateVideoIdentities) {
@@ -349,7 +389,7 @@ object ConflictDetector {
                     "Multiple video files were detected for the same media item.",
                 )
             }
-            if (targetKey in duplicates) {
+            if (qualifiedTargetKey in duplicates) {
                 conflicts += OperationConflict(
                     ConflictType.DUPLICATE_DESTINATION,
                     "Multiple source files map to the same destination.",
@@ -361,10 +401,17 @@ object ConflictDetector {
                     )
                 }
             }
-            val existingMatches = existingByCaseFolded[targetKey].orEmpty()
-            val targetIsOwnSource = sourceAndDestinationAreSame && targetKey == sourceKey
+            val operationUsesSourceTree = sourceTreeUri?.let { operation.destinationTreeUri == it }
+                ?: sourceAndDestinationAreSame
+            val existingMatches = buildList {
+                addAll(existingByCaseFolded[qualifiedTargetKey].orEmpty())
+                if (sourceTreeUri == null || operationUsesSourceTree) {
+                    addAll(existingByCaseFolded[targetKey].orEmpty())
+                }
+            }
+            val targetIsOwnSource = operationUsesSourceTree && targetKey == sourceKey
             if (existingMatches.isNotEmpty() && !targetIsOwnSource) {
-                if (existingMatches.any { it != operation.destinationPath }) {
+                if (existingMatches.any { existingPath(it) != operation.destinationPath }) {
                     conflicts += OperationConflict(
                         ConflictType.CASE_ONLY_COLLISION,
                         "The destination differs from an existing path only by letter case.",
@@ -384,6 +431,13 @@ object ConflictDetector {
     }
 
     private fun caseFold(path: String): String = path.replace('\\', '/').trim('/').lowercase(Locale.ROOT)
+
+    private fun destinationKey(
+        operation: PlannedFileOperation,
+        path: String = operation.destinationPath,
+    ): String = caseFold("${operation.destinationTreeUri}\u0000$path")
+
+    private fun existingPath(value: String): String = value.substringAfter('\u0000', value)
 }
 
 class PlanConflictResolver(
@@ -406,6 +460,7 @@ class PlanConflictResolver(
                 },
                 existingDestinationPaths = plan.existingDestinationPaths,
                 sourceAndDestinationAreSame = plan.sourceAndDestinationAreSame,
+                sourceTreeUri = plan.sourceTreeUri.takeIf(String::isNotBlank),
             ),
         )
 
@@ -425,7 +480,10 @@ class PlanConflictResolver(
                 .filter(String::isNotBlank)
                 .joinToString("/")
             val sourceDirectory = operation.sourcePath.substringBeforeLast('/', "")
-            val sameParent = plan.sourceAndDestinationAreSame && sourceDirectory == destinationDirectory
+            val sameParent = (
+                plan.sourceTreeUri.takeIf(String::isNotBlank)?.let { operation.destinationTreeUri == it }
+                    ?: plan.sourceAndDestinationAreSame
+                ) && sourceDirectory == destinationDirectory
             val sameName = operation.originalName == safeName
             val operationType = when {
                 sameParent && sameName -> OperationType.SKIP
@@ -454,6 +512,7 @@ class PlanConflictResolver(
                 operations = revised,
                 existingDestinationPaths = plan.existingDestinationPaths,
                 sourceAndDestinationAreSame = plan.sourceAndDestinationAreSame,
+                sourceTreeUri = plan.sourceTreeUri.takeIf(String::isNotBlank),
             ),
         )
     }

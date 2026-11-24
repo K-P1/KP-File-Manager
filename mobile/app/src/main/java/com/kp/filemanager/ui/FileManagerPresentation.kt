@@ -13,6 +13,7 @@ enum class AppDestination(
     val compactLabel: String = label,
 ) {
     ORGANIZE("Organize Media", "Organize"),
+    PROTECTED_EXPORT("Protected Export", "Export"),
     BATCH_RENAME("Batch Rename", "Rename"),
     FIND_AND_REPLACE("Find & Replace", "Replace"),
     SETTINGS("Settings"),

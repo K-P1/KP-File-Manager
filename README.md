@@ -94,16 +94,19 @@ The Android app is a single-activity native application built with Kotlin and Je
 
 1. Select a source folder with Android's system folder picker.
 2. Choose **Organize**, **Batch Rename**, or **Find & Replace**.
-3. For media organization, set the scan depth and optional Movies/TV Shows destination folder names.
-4. Scan and review the complete retained plan, including conflicts, warnings, skipped files, and proposed paths.
-5. Resolve blocking conflicts and explicitly apply the plan.
-6. Review the result and use **Undo** before closing the app if needed.
+3. For media organization, review the output root. It defaults to the selected source folder, but you can choose another root.
+4. Optionally select existing Movies and TV library folders directly, or set the folder names to create or reuse under the output root.
+5. Scan and review the complete retained plan, including conflicts, warnings, skipped files, and proposed paths.
+6. Resolve blocking conflicts and explicitly apply the plan.
+7. Review the result and use **Undo** before closing the app if needed.
 
 Scanning and previewing are read-only. The app does not mutate files until a reviewed plan is explicitly applied.
 
 ### Media organization
 
 The organizer recursively scans to a configurable depth of **0-20** directories (default **4**). It performs one indexed scan, parses and groups media in memory, resolves the selected library context, builds a deterministic plan, then executes approved operations and safely cleans up verified-empty source folders.
+
+The output root defaults to the source folder. Under that root the app reuses existing Movies and TV folders or creates the configured folder paths when they are missing. Optional direct Movies-library and TV-library selections support devices where Android's picker will not grant access to the libraries' shared parent; files are placed relative to those selected library folders without adding a duplicate library-name level.
 
 It recognizes these file roles:
 
@@ -156,7 +159,7 @@ On Android 11 and later, the system picker cannot grant access to a storage root
 
 - Android Studio with JDK 17 or newer.
 - Android SDK 36.
-- An Android 6.0 / API 23 or newer device or emulator for installation.
+- An Android 7.0 / API 24 or newer device or emulator for installation.
 
 From the repository root:
 
@@ -181,7 +184,7 @@ KP File Manager is designed to make planned filesystem changes visible before th
 - Existing destinations and duplicate targets are conflicts; files are never silently overwritten.
 - A failure for one Android item is reported without hiding successful items.
 - The Android organizer revalidates operations and only deletes source folders confirmed empty; the selected root and destination library folders are protected.
-- Undo is best effort, applies only to successful operations from the latest in-memory session, and may fail if a file was changed, moved, deleted, or blocked outside the app afterwards.
+- Undo is best effort, applies only to successful operations from the latest in-memory session, and may fail if a file was changed, moved, deleted, or blocked outside the app afterwards. After restoring files, it removes empty destination folders created by that operation; cleanup failures remain retryable without moving restored files again.
 - Android storage-provider behavior is not uniform. Test the provider and folder type you intend to use before processing a valuable library.
 
 ## Repository layout
@@ -219,3 +222,4 @@ The desktop script compiles the package and runs its regression suite without re
 
 Generated Python environments, Android/Gradle build output, local SDK configuration, and runtime logs are ignored by Git. Do not commit credentials, local storage URIs, APKs, or build artifacts.
 
+The Android app now includes a **Protected Export** tab for Shizuku-powered MovieBox video/subtitle exporting. It reuses KP's media planner to sort files into shared Movies and TV Shows libraries. See [protected export details](docs/PROTECTED_EXPORT.md).

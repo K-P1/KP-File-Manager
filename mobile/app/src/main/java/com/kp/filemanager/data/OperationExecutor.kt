@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/data/OperationExecutor.kt: Executes plans, requires exhaustive old-folder cleanup for completion, and maintains session undo; last changed for reliable ancestor deletion. */
+/** mobile/app/src/main/java/com/kp/filemanager/data/OperationExecutor.kt: Executes plans and performs retryable two-phase undo with cleanup of app-created output folders. */
 package com.kp.filemanager.data
 
 import com.kp.filemanager.domain.OperationFailure
@@ -28,7 +28,8 @@ class OperationExecutor(
         val failures = mutableListOf<OperationFailure>()
         val skipped = plan.operations.filter { it.status != OperationStatus.READY }
         val mutations = mutableListOf<DocumentMutation>()
-        val preparedDirectories = mutableMapOf<String, PreparedDirectory>()
+        val createdDirectoryUris = mutableListOf<String>()
+        val preparedDirectories = mutableMapOf<DestinationDirectoryKey, PreparedDirectory>()
         progressReporter?.begin(OrganizationPhase.ORGANIZING_FILES, plan.operations.size)
         skipped.forEach { operation ->
             progressReporter?.currentItem(operation.originalName)
@@ -46,7 +47,11 @@ class OperationExecutor(
             }
             var prepared: PreparedDirectory? = null
             try {
-                prepared = preparedDirectories[operation.destinationDirectoryPath]
+                val destinationKey = DestinationDirectoryKey(
+                    treeUri = operation.destinationTreeUri,
+                    relativePath = operation.destinationDirectoryPath,
+                )
+                prepared = preparedDirectories[destinationKey]
                     ?: gateway.ensureDirectoryPath(
                         treeUri = operation.destinationTreeUri,
                         relativePath = operation.destinationDirectoryPath,
@@ -58,8 +63,11 @@ class OperationExecutor(
                         beforeParentPath = operation.sourcePath.substringBeforeLast('/', ""),
                     )
                 mutations += mutation
+                prepared.createdDirectoryUris.forEach { uri ->
+                    if (uri !in createdDirectoryUris) createdDirectoryUris += uri
+                }
                 completed += operation.copy(status = OperationStatus.COMPLETED)
-                preparedDirectories[operation.destinationDirectoryPath] = prepared.copy(
+                preparedDirectories[destinationKey] = prepared.copy(
                     createdDirectoryUris = emptyList(),
                 )
                 progressReporter?.completeItem(operation.operationType)
@@ -89,7 +97,13 @@ class OperationExecutor(
         }
         val organizationDurationMillis = nanosToMillis(nanoTime() - organizationStarted)
 
-        if (mutations.isNotEmpty()) lastJournal = UndoJournal(plan, mutations)
+        if (mutations.isNotEmpty()) {
+            lastJournal = UndoJournal(
+                plan = plan,
+                mutations = mutations,
+                createdDirectoryUris = createdDirectoryUris,
+            )
+        }
         val completedBySource = completed.associateBy(PlannedFileOperation::sourceUri)
         val failuresBySource = failures.associateBy { it.operation.sourceUri }
         val resultPlan = plan.copy(
@@ -145,46 +159,60 @@ class OperationExecutor(
             ?: return OperationResult(OperationPlan("", emptyList()))
         val restored = mutableListOf<PlannedFileOperation>()
         val failures = mutableListOf<OperationFailure>()
-        val remaining = mutableListOf<DocumentMutation>()
+        val remainingMutations = mutableListOf<DocumentMutation>()
 
         journal.mutations.asReversed().forEach { mutation ->
             try {
                 gateway.undo(mutation)
-                mutation.createdDirectoryUris.asReversed().forEach {
-                    gateway.deleteDirectoryIfEmpty(it, null)
-                }
                 restored += mutation.operation.copy(status = OperationStatus.COMPLETED)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: SecurityException) {
-                remaining += mutation
+                remainingMutations += mutation
                 failures += OperationFailure(mutation.operation, "The document provider denied this restore.")
             } catch (error: IllegalStateException) {
-                remaining += mutation
+                remainingMutations += mutation
                 failures += OperationFailure(mutation.operation, safeMessage(error))
             } catch (error: IllegalArgumentException) {
-                remaining += mutation
+                remainingMutations += mutation
                 failures += OperationFailure(mutation.operation, "The document provider rejected this restore.")
             } catch (error: UnsupportedOperationException) {
-                remaining += mutation
+                remainingMutations += mutation
                 failures += OperationFailure(mutation.operation, "The document provider does not support this restore.")
             } catch (error: java.io.IOException) {
-                remaining += mutation
+                remainingMutations += mutation
                 failures += OperationFailure(mutation.operation, "The document provider could not restore this file.")
             }
         }
 
-        lastJournal = remaining.asReversed()
-            .takeIf(List<DocumentMutation>::isNotEmpty)
-            ?.let { UndoJournal(journal.plan, it) }
+        val cleanupResult = if (remainingMutations.isEmpty()) {
+            cleanCreatedDirectories(journal.createdDirectoryUris)
+        } else {
+            CreatedDirectoryCleanupResult(journal.createdDirectoryUris)
+        }
+        val pendingMutations = remainingMutations.asReversed()
+        lastJournal = if (pendingMutations.isNotEmpty() || cleanupResult.remainingUris.isNotEmpty()) {
+            UndoJournal(
+                plan = journal.plan,
+                mutations = pendingMutations,
+                createdDirectoryUris = cleanupResult.remainingUris,
+            )
+        } else {
+            null
+        }
         return OperationResult(
             plan = journal.plan,
             completedOperations = restored,
             failedOperations = failures,
+            warnings = cleanupResult.failures,
+            cleanupFailures = cleanupResult.failures,
+            cleanedDirectoryCount = cleanupResult.deletedCount,
         )
     }
 
-    fun canUndo(): Boolean = lastJournal?.mutations?.isNotEmpty() == true
+    fun canUndo(): Boolean = lastJournal?.let { journal ->
+        journal.mutations.isNotEmpty() || journal.createdDirectoryUris.isNotEmpty()
+    } == true
 
     private fun validate(operation: PlannedFileOperation): String? = when {
         operation.operationType == OperationType.SKIP -> "This operation is not executable."
@@ -205,9 +233,47 @@ class OperationExecutor(
     private fun safeMessage(error: IllegalStateException): String =
         error.message?.take(160) ?: "The filesystem state changed before this operation could run."
 
+    private fun cleanCreatedDirectories(createdDirectoryUris: List<String>): CreatedDirectoryCleanupResult {
+        val remaining = mutableListOf<String>()
+        val failures = mutableListOf<String>()
+        var deletedCount = 0
+        createdDirectoryUris.asReversed().forEach { uri ->
+            try {
+                if (gateway.deleteDirectoryIfEmpty(uri, null)) {
+                    deletedCount += 1
+                } else {
+                    remaining += uri
+                    failures += "An output folder created by this operation is not empty and was left in place."
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                remaining += uri
+                failures += "An empty output folder created by this operation could not be removed."
+            }
+        }
+        return CreatedDirectoryCleanupResult(
+            remainingUris = remaining.asReversed(),
+            failures = failures,
+            deletedCount = deletedCount,
+        )
+    }
+
     private data class UndoJournal(
         val plan: OperationPlan,
         val mutations: List<DocumentMutation>,
+        val createdDirectoryUris: List<String>,
+    )
+
+    private data class CreatedDirectoryCleanupResult(
+        val remainingUris: List<String>,
+        val failures: List<String> = emptyList(),
+        val deletedCount: Int = 0,
+    )
+
+    private data class DestinationDirectoryKey(
+        val treeUri: String,
+        val relativePath: String,
     )
 
     private fun nanosToMillis(value: Long): Long = value.coerceAtLeast(0) / 1_000_000L

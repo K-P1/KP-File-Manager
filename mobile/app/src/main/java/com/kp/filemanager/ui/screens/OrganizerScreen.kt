@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/screens/OrganizerScreen.kt: Renders context prompting, phased determinate progress, review, results, cleanup summary, and undo; optimized for media organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/screens/OrganizerScreen.kt: Renders explicit source/output setup, progress, review, results, and undo cleanup status. */
 package com.kp.filemanager.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
@@ -108,6 +108,8 @@ fun OrganizerScreen(
     actions: FileManagerActions,
     onPickSource: () -> Unit,
     onPickDestination: () -> Unit,
+    onPickMovieLibrary: () -> Unit,
+    onPickTvLibrary: () -> Unit,
     isExpanded: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -175,6 +177,8 @@ fun OrganizerScreen(
             OrganizerWorkflowState.UNDO_COMPLETE -> StickyActionBar(
                 primaryLabel = "Done",
                 onPrimary = actions::done,
+                secondaryLabel = "Retry undo cleanup".takeIf { uiState.canUndo },
+                onSecondary = { actions.undo() }.takeIf { uiState.canUndo },
             )
             else -> Unit
         }
@@ -244,6 +248,8 @@ fun OrganizerScreen(
                 actions = actions,
                 onPickSource = onPickSource,
                 onPickDestination = onPickDestination,
+                onPickMovieLibrary = onPickMovieLibrary,
+                onPickTvLibrary = onPickTvLibrary,
                 onScanOptions = { showScanOptions = true },
                 modifier = Modifier.fillMaxSize().padding(padding),
             )
@@ -254,7 +260,6 @@ fun OrganizerScreen(
         ScanOptionsSheet(
             uiState = uiState,
             actions = actions,
-            onPickDestination = onPickDestination,
             onDismiss = { showScanOptions = false },
         )
     }
@@ -382,6 +387,8 @@ private fun OrganizerSetupContent(
     actions: FileManagerActions,
     onPickSource: () -> Unit,
     onPickDestination: () -> Unit,
+    onPickMovieLibrary: () -> Unit,
+    onPickTvLibrary: () -> Unit,
     onScanOptions: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -410,10 +417,64 @@ private fun OrganizerSetupContent(
         }
         item {
             FolderSelectorCard(
-                title = "Selected folder",
+                title = "Source folder",
                 folderName = uiState.sourceName,
                 folderPath = uiState.sourceUri,
                 onSelect = onPickSource,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            FolderSelectorCard(
+                title = "Output root folder",
+                folderName = uiState.effectiveDestinationName,
+                folderPath = uiState.effectiveDestinationUri,
+                onSelect = onPickDestination,
+                onClear = (actions::clearDestination).takeIf { !uiState.usesSourceAsDestination },
+                emptyMessage = "Uses the source folder by default",
+                selectLabel = "Choose output folder",
+                changeLabel = "Change output folder",
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            Text(
+                text = "Movies go into '${uiState.movieFolderName}' and TV episodes into " +
+                    "'${uiState.tvFolderName}' under this output root. Existing folders are reused; " +
+                    "missing folders are created.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        item {
+            SectionHeader(
+                title = "Existing library folders",
+                supportingText = "Optional: choose the Movies and TV folders directly when Android will not let you select their shared parent.",
+            )
+        }
+        item {
+            FolderSelectorCard(
+                title = "Movies library override",
+                folderName = uiState.movieLibraryName,
+                folderPath = uiState.movieLibraryUri,
+                onSelect = onPickMovieLibrary,
+                onClear = (actions::clearMovieLibrary).takeIf { uiState.movieLibraryUri != null },
+                emptyMessage = "Uses '${uiState.movieFolderName}' under the output root",
+                selectLabel = "Choose Movies folder",
+                changeLabel = "Change Movies folder",
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item {
+            FolderSelectorCard(
+                title = "TV library override",
+                folderName = uiState.tvLibraryName,
+                folderPath = uiState.tvLibraryUri,
+                onSelect = onPickTvLibrary,
+                onClear = (actions::clearTvLibrary).takeIf { uiState.tvLibraryUri != null },
+                emptyMessage = "Uses '${uiState.tvFolderName}' under the output root",
+                selectLabel = "Choose TV folder",
+                changeLabel = "Change TV folder",
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -423,18 +484,6 @@ private fun OrganizerSetupContent(
                 onOpen = onScanOptions,
                 modifier = Modifier.fillMaxWidth(),
             )
-        }
-        if (uiState.destinationUri != null) {
-            item {
-                FolderSelectorCard(
-                    title = "Organization destination",
-                    folderName = uiState.destinationName,
-                    folderPath = uiState.destinationUri,
-                    onSelect = onPickDestination,
-                    onClear = actions::clearDestination,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
         }
         item { Spacer(modifier = Modifier.height(MaterialTheme.spacing.standard)) }
     }
@@ -456,7 +505,7 @@ private fun ScanOptionsCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text("Scan options", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    text = "${uiState.maximumScanDepth} levels • ${uiState.movieFolderName} • ${uiState.tvFolderName}",
+                    text = "${uiState.maximumScanDepth} levels - ${uiState.movieFolderName} - ${uiState.tvFolderName}",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -489,9 +538,9 @@ private fun ScanningContent(
                 "Using the completed index to build one deterministic plan."
             },
             progressLabel = if (progress.isIndeterminate) {
-                "${progress.filesDiscovered} files â€¢ ${progress.directoriesDiscovered} folders discovered"
+                "${progress.filesDiscovered} files - ${progress.directoriesDiscovered} folders discovered"
             } else {
-                "${progress.processedItems} / ${progress.totalItems} â€¢ ${progress.remainingItems} remaining"
+                "${progress.processedItems} / ${progress.totalItems} - ${progress.remainingItems} remaining"
             },
             currentLabel = "Current item",
             currentValue = progress.currentItem,
@@ -640,7 +689,7 @@ private fun ReviewContent(
             item {
                 PageHeader(
                     title = "Review Changes",
-                    supportingText = "${summary.ready} ready • ${summary.conflicts} need attention • ${summary.unchanged} unchanged",
+                    supportingText = "${summary.ready} ready - ${summary.conflicts} need attention - ${summary.unchanged} unchanged",
                 )
             }
             if (plan.scanWarnings.isNotEmpty()) {
@@ -735,7 +784,7 @@ private fun ReviewOverview(
         item {
             PageHeader(
                 title = "Review Changes",
-                supportingText = "${summary.detected} files detected • ${summary.ready} changes planned",
+                supportingText = "${summary.detected} files detected - ${summary.ready} changes planned",
             )
         }
         item { ReviewStats(summary = summary) }
@@ -1070,8 +1119,8 @@ private fun ApplyingContent(
             supportingText = "Applying the approved plan without overwriting existing files.",
             progressLabel = buildString {
                 append("${progress.processedItems} / ${progress.totalItems}")
-                append(" â€¢ ${progress.remainingItems} remaining")
-                progress.etaMillis?.let { append(" â€¢ ETA ${formatEta(it)}") }
+                append(" - ${progress.remainingItems} remaining")
+                progress.etaMillis?.let { append(" - ETA ${formatEta(it)}") }
             },
             currentLabel = "Current item",
             currentValue = progress.currentItem,
@@ -1211,7 +1260,6 @@ private fun UndoCompleteContent(
 private fun ScanOptionsSheet(
     uiState: FileManagerUiState,
     actions: FileManagerActions,
-    onPickDestination: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -1248,22 +1296,11 @@ private fun ScanOptionsSheet(
                 label = { Text("TV destination") },
                 singleLine = true,
             )
-            FolderSelectorCard(
-                title = "Organization destination",
-                folderName = uiState.destinationName,
-                folderPath = uiState.destinationUri,
-                onSelect = onPickDestination,
-                onClear = (actions::clearDestination).takeIf { uiState.destinationUri != null },
-                emptyMessage = "Same as selected media folder",
-                selectLabel = "Choose another folder",
-                modifier = Modifier.fillMaxWidth(),
-            )
             TextButton(
                 onClick = {
                     actions.setMaximumScanDepth(4)
                     actions.setMovieFolderName("Movies")
                     actions.setTvFolderName("TV Shows")
-                    actions.clearDestination()
                 },
             ) {
                 Text("Reset defaults")
@@ -1288,10 +1325,10 @@ internal fun ApplyConfirmationDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(MaterialTheme.spacing.tight)) {
                 Text("KP File Manager will:")
-                Text("• Move ${summary.moves} files")
-                Text("• Rename ${summary.renames} files")
-                Text("• Leave ${summary.unchanged} files unchanged")
-                Text("• Skip ${summary.skipped} files")
+                Text("- Move ${summary.moves} files")
+                Text("- Rename ${summary.renames} files")
+                Text("- Leave ${summary.unchanged} files unchanged")
+                Text("- Skip ${summary.skipped} files")
                 Spacer(modifier = Modifier.height(MaterialTheme.spacing.micro))
                 Text("No existing files will be overwritten.")
                 Text("You can undo this operation until the app is closed.")

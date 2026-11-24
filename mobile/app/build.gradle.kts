@@ -1,4 +1,8 @@
-// mobile/app/build.gradle.kts: Configures the lightweight Android application and tests; created for the mobile application.
+// Path: mobile/app/build.gradle.kts
+// Purpose: Configures the Android application, build variants, and test dependencies.
+// Last changed: 2026-11-23 — aligned the minimum SDK with Shizuku and adopted typed Kotlin compiler options.
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,7 +15,7 @@ android {
 
     defaultConfig {
         applicationId = "com.kp.filemanager"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
@@ -31,16 +35,19 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
+        aidl = true
         compose = true
     }
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
@@ -56,6 +63,9 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     testImplementation("junit:junit:4.13.2")
 

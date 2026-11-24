@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt: Orchestrates organizer state and progress; last changed to keep failed folder cleanup out of the completed state. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerViewModel.kt: Orchestrates explicit output selection, organizer progress, results, and retryable undo cleanup. */
 package com.kp.filemanager.ui
 
 import androidx.compose.runtime.Stable
@@ -26,6 +26,10 @@ interface FileManagerActions {
     fun selectSource(uri: String)
     fun selectDestination(uri: String)
     fun clearDestination()
+    fun selectMovieLibrary(uri: String)
+    fun clearMovieLibrary()
+    fun selectTvLibrary(uri: String)
+    fun clearTvLibrary()
     fun setMaximumScanDepth(value: Int)
     fun setMovieFolderName(value: String)
     fun setTvFolderName(value: String)
@@ -88,9 +92,6 @@ class FileManagerViewModel(
             mutate {
                 if (sourceUri == uri) copy(sourceName = name) else this
             }
-            if (_uiState.value.sourceUri == uri && _uiState.value.mode == OperationMode.ORGANIZE_MEDIA) {
-                preview()
-            }
         }
     }
 
@@ -105,6 +106,31 @@ class FileManagerViewModel(
     }
 
     override fun clearDestination() = invalidatePlan { copy(destinationUri = null, destinationName = "") }
+
+    override fun selectMovieLibrary(uri: String) {
+        invalidatePlan { copy(movieLibraryUri = uri, movieLibraryName = "Selected folder") }
+        viewModelScope.launch {
+            val name = safeFolderName(uri)
+            mutate {
+                if (movieLibraryUri == uri) copy(movieLibraryName = name) else this
+            }
+        }
+    }
+
+    override fun clearMovieLibrary() = invalidatePlan { copy(movieLibraryUri = null, movieLibraryName = "") }
+
+    override fun selectTvLibrary(uri: String) {
+        invalidatePlan { copy(tvLibraryUri = uri, tvLibraryName = "Selected folder") }
+        viewModelScope.launch {
+            val name = safeFolderName(uri)
+            mutate {
+                if (tvLibraryUri == uri) copy(tvLibraryName = name) else this
+            }
+        }
+    }
+
+    override fun clearTvLibrary() = invalidatePlan { copy(tvLibraryUri = null, tvLibraryName = "") }
+
     override fun setMaximumScanDepth(value: Int) {
         invalidatePlan { copy(maximumScanDepth = value.coerceIn(0, 20)) }
         persistOrganizationDefaults()
@@ -144,9 +170,9 @@ class FileManagerViewModel(
                     },
                     organizationProgress = OrganizationProgress(),
                     progressText = if (mode == OperationMode.ORGANIZE_MEDIA) {
-                        "Scanning media and building a safe change plan…"
+                        "Scanning media and building a safe change plan..."
                     } else {
-                        "Building a safe filename preview…"
+                        "Building a safe filename preview..."
                     },
                     activePlan = null,
                     statusTitle = null,
@@ -272,7 +298,7 @@ class FileManagerViewModel(
                     mutate {
                         copy(
                             isWorking = false,
-                            statusTitle = "Couldnâ€™t resolve library context",
+                            statusTitle = "Couldn't resolve library context",
                             statusMessage = error.message ?: "Choose another library context.",
                         )
                     }
@@ -289,7 +315,7 @@ class FileManagerViewModel(
                 copy(
                     isWorking = true,
                     workflowState = OrganizerWorkflowState.APPLYING,
-                    progressText = "Applying the approved change plan…",
+                    progressText = "Applying the approved change plan...",
                     statusTitle = null,
                     statusMessage = null,
                     failures = emptyList(),
@@ -362,7 +388,7 @@ class FileManagerViewModel(
                 copy(
                     isWorking = true,
                     workflowState = OrganizerWorkflowState.UNDOING,
-                    progressText = "Restoring the previous operation…",
+                    progressText = "Restoring the previous operation...",
                     statusTitle = null,
                     statusMessage = null,
                 )
@@ -375,9 +401,17 @@ class FileManagerViewModel(
                             progressText = "",
                             activePlan = null,
                             workflowState = OrganizerWorkflowState.UNDO_COMPLETE,
-                            statusTitle = if (result.failures.isEmpty()) "Undo complete" else "Undo partly complete",
-                            statusMessage = "Restored ${result.completedCount} item(s).",
-                            failures = result.failures,
+                            statusTitle = if (result.isComplete) "Undo complete" else "Undo partly complete",
+                            statusMessage = buildString {
+                                append("Restored ${result.completedCount} item(s).")
+                                if (result.cleanedDirectoryCount > 0) {
+                                    append(" Removed ${result.cleanedDirectoryCount} folder(s) created by the operation.")
+                                }
+                                if (result.cleanupFailures.isNotEmpty()) {
+                                    append(" Some created folders still need cleanup.")
+                                }
+                            },
+                            failures = result.failures + result.cleanupFailures,
                             canUndo = repository.canUndo(),
                         )
                     }
@@ -426,7 +460,7 @@ class FileManagerViewModel(
             isWorking = false,
             progressText = "",
             workflowState = workflowState,
-            statusTitle = "Couldn’t complete the operation",
+            statusTitle = "Couldn't complete the operation",
             statusMessage = error.message ?: "Check that the selected folder still allows changes.",
         )
     }
@@ -435,6 +469,8 @@ class FileManagerViewModel(
         mode = mode,
         sourceTreeUri = checkNotNull(sourceUri),
         destinationTreeUri = destinationUri,
+        movieLibraryTreeUri = movieLibraryUri,
+        tvLibraryTreeUri = tvLibraryUri,
         maximumScanDepth = maximumScanDepth,
         movieFolderName = movieFolderName,
         tvFolderName = tvFolderName,
@@ -506,7 +542,7 @@ class FileManagerViewModel(
         } else {
             append(": ${progress.processedItems}/${progress.totalItems}")
         }
-        progress.currentItem.takeIf(String::isNotBlank)?.let { append(" â€¢ $it") }
+        progress.currentItem.takeIf(String::isNotBlank)?.let { append(" - $it") }
     }
 
     private suspend fun safeFolderName(uri: String): String = try {

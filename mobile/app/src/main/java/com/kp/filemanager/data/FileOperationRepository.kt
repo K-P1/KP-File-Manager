@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/data/FileOperationRepository.kt: Orchestrates one indexed scan through context resolution, deterministic planning, execution, verification, cleanup, metrics, and undo; optimized for media workflow performance. */
+/** mobile/app/src/main/java/com/kp/filemanager/data/FileOperationRepository.kt: Orchestrates indexed planning across output roots, conflict checks, execution, cleanup, metrics, and undo. */
 package com.kp.filemanager.data
 
 import android.util.Log
@@ -94,11 +94,7 @@ class DefaultFileOperationRepository(
         val plan = when (request.mode) {
             OperationMode.ORGANIZE_MEDIA -> {
                 val sameTree = destinationTree == request.sourceTreeUri
-                val existingPaths = if (sameTree) {
-                    sourceScan.index.files.mapTo(mutableSetOf()) { it.sourcePath }
-                } else {
-                    emptySet()
-                }
+                val existingPaths = sourceScan.index.files.mapTo(mutableSetOf()) { it.sourcePath }
                 val contextIndex = if (sameTree) {
                     sourceScan.index
                 } else {
@@ -119,6 +115,9 @@ class DefaultFileOperationRepository(
                     scanWarnings = sourceScan.warnings,
                     libraryContext = context,
                     progressReporter = reporter,
+                    movieLibraryTreeUri = request.movieLibraryTreeUri,
+                    tvLibraryTreeUri = request.tvLibraryTreeUri,
+                    sourceTreeUri = request.sourceTreeUri,
                 )
                 revalidateExternalDestinations(initialPlan)
             }
@@ -209,11 +208,7 @@ class DefaultFileOperationRepository(
         val replanned = mediaPlanner.plan(
             index = index,
             destinationTreeUri = plan.destinationTreeUri,
-            existingDestinationPaths = if (plan.sourceAndDestinationAreSame) {
-                index.files.mapTo(mutableSetOf()) { it.sourcePath }
-            } else {
-                emptySet()
-            },
+            existingDestinationPaths = plan.existingDestinationPaths,
             sourceAndDestinationAreSame = plan.sourceAndDestinationAreSame,
             movieFolderName = plan.movieFolderName,
             tvFolderName = plan.tvFolderName,
@@ -224,6 +219,9 @@ class DefaultFileOperationRepository(
                 selectedRootIsSeason = plan.libraryContext?.selectedRootIsSeason == true,
                 reason = "Selected once by the user after ambiguous context detection.",
             ),
+            movieLibraryTreeUri = plan.movieLibraryTreeUri,
+            tvLibraryTreeUri = plan.tvLibraryTreeUri,
+            sourceTreeUri = plan.sourceTreeUri.takeIf(String::isNotBlank),
         ).copy(performanceMetrics = plan.performanceMetrics)
         val resolvedPlan = revalidateExternalDestinations(replanned)
         OperationResult(
@@ -287,22 +285,28 @@ class DefaultFileOperationRepository(
     }
 
     private fun revalidateExternalDestinations(plan: OperationPlan): OperationPlan {
-        if (plan.sourceAndDestinationAreSame) return plan
         val occupiedDestinations = plan.operations
             .asSequence()
             .filter { it.status == OperationStatus.READY }
-            .map { it.destinationPath }
-            .filter { gateway.destinationExists(plan.destinationTreeUri, it) }
+            .filter {
+                plan.sourceTreeUri.isBlank() || it.destinationTreeUri != plan.sourceTreeUri
+            }
+            .filter { gateway.destinationExists(it.destinationTreeUri, it.destinationPath) }
+            .map { destinationIdentity(it.destinationTreeUri, it.destinationPath) }
             .toSet()
+        val existingDestinations = plan.existingDestinationPaths + occupiedDestinations
         return plan.copy(
             operations = ConflictDetector.detect(
                 operations = plan.operations,
-                existingDestinationPaths = occupiedDestinations,
-                sourceAndDestinationAreSame = false,
+                existingDestinationPaths = existingDestinations,
+                sourceAndDestinationAreSame = plan.sourceAndDestinationAreSame,
+                sourceTreeUri = plan.sourceTreeUri.takeIf(String::isNotBlank),
             ),
-            existingDestinationPaths = occupiedDestinations,
+            existingDestinationPaths = existingDestinations,
         )
     }
+
+    private fun destinationIdentity(treeUri: String, path: String): String = "$treeUri\u0000$path"
 
     private fun nanosToMillis(value: Long): Long = value.coerceAtLeast(0) / 1_000_000L
 

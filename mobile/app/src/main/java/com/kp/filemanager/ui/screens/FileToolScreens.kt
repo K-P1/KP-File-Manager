@@ -170,7 +170,7 @@ private fun FileToolScreen(
                     "Building preview"
                 },
                 supportingText = "Checking filenames and destinations without overwriting existing files.",
-                progressLabel = uiState.progressText.ifBlank { "Working…" },
+                progressLabel = uiState.progressText.ifBlank { "Working..." },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)

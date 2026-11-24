@@ -10,3 +10,6 @@ mobile/.kotlin/
 mobile/local.properties
 mobile/*.log
 mobile/**/build/
+tools/codebase_exports/
+tools/replacement_downloads/
+tools/replacement_backups/

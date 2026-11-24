@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/components/KpComponents.kt: Provides accessible cards, headers, status, determinate progress, and action components; updated for pipeline progress. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/components/KpComponents.kt: Provides accessible folder, status, progress, and action components with encoding-safe labels. */
 package com.kp.filemanager.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
@@ -260,11 +260,11 @@ fun StatusMessage(
                 }
             }
             details.take(3).forEach { detail ->
-                Text("• $detail", style = MaterialTheme.typography.bodySmall)
+                Text("- $detail", style = MaterialTheme.typography.bodySmall)
             }
             if (details.size > 3) {
                 Text(
-                    text = "And ${details.size - 3} more…",
+                    text = "And ${details.size - 3} more...",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

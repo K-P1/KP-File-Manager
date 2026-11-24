@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/MainActivity.kt: Creates the optimized media repository with debug-only instrumentation and renders the Compose application; updated for pipeline telemetry. */
+/** mobile/app/src/main/java/com/kp/filemanager/MainActivity.kt: Creates the media repository, persists folder grants, and launches source and output pickers. */
 package com.kp.filemanager
 
 import android.content.Intent
@@ -22,6 +22,8 @@ import androidx.core.content.edit
 import com.kp.filemanager.data.DefaultFileOperationRepository
 import com.kp.filemanager.data.OperationLogStore
 import com.kp.filemanager.data.SafDocumentGateway
+import com.kp.filemanager.export.ProtectedExportRepository
+import com.kp.filemanager.export.ProtectedExportViewModel
 import com.kp.filemanager.ui.FileManagerScreen
 import com.kp.filemanager.ui.FileManagerViewModel
 import com.kp.filemanager.ui.OrganizationDefaults
@@ -36,6 +38,10 @@ class MainActivity : ComponentActivity() {
             logStore = OperationLogStore(this),
             debugLoggingEnabled = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0,
         )
+    }
+    private val exportRepository by lazy { ProtectedExportRepository(applicationContext) }
+    private val exportViewModel: ProtectedExportViewModel by viewModels {
+        ProtectedExportViewModel.Factory(exportRepository)
     }
     private val viewModel: FileManagerViewModel by viewModels {
         FileManagerViewModel.Factory(
@@ -55,6 +61,18 @@ class MainActivity : ComponentActivity() {
         uri?.let {
             persistFolderAccess(it)
             viewModel.selectDestination(it.toString())
+        }
+    }
+    private val movieLibraryPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            persistFolderAccess(it)
+            viewModel.selectMovieLibrary(it.toString())
+        }
+    }
+    private val tvLibraryPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let {
+            persistFolderAccess(it)
+            viewModel.selectTvLibrary(it.toString())
         }
     }
 
@@ -93,8 +111,11 @@ class MainActivity : ComponentActivity() {
             KpFileManagerTheme(themePreference = themePreference) {
                 FileManagerScreen(
                     viewModel = viewModel,
+                    exportViewModel = exportViewModel,
                     onPickSource = { sourcePicker.launch(null) },
                     onPickDestination = { destinationPicker.launch(null) },
+                    onPickMovieLibrary = { movieLibraryPicker.launch(null) },
+                    onPickTvLibrary = { tvLibraryPicker.launch(null) },
                     themePreference = themePreference,
                     onThemePreferenceChange = { selected ->
                         themeName = selected.name
@@ -103,6 +124,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        exportViewModel.refreshAccess()
     }
 
     private fun persistFolderAccess(uri: Uri) {

@@ -1,0 +1,21 @@
+# Path: tools/codebase_packager.toml
+# Purpose: Configure safe source extraction limits, output and Git-style ignore rules.
+# Last changed: 2026-09-16, initialize editable codebase packaging configuration.
+# Size limits are evaluated before ZIP compression.
+# Only files directly inside a folder count toward max_folder_mib.
+# Built-in hidden-file, symlink and credential exclusions cannot be overridden.
+
+[limits]
+max_file_kib = 350
+max_folder_mib = 2
+max_archive_mib = 25
+max_files = 2000
+
+[output]
+directory = "codebase_exports" # Relative to tools/
+
+[ignore]
+# Git-style: / anchors to root, trailing / ignores folders, ** matches deeply.
+# ! can undo another custom rule only if its parent directories are included.
+patterns = '''
+'''

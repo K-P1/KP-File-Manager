@@ -138,7 +138,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
             ) {
                 Text(
-                    text = "KP File Manager only accesses folders you explicitly select through Android’s system folder picker. It does not request broad storage access.",
+                    text = "KP File Manager only accesses folders you explicitly select through Android's system folder picker. It does not request broad storage access.",
                     modifier = Modifier.padding(MaterialTheme.spacing.standard),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,

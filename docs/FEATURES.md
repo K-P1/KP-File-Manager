@@ -100,6 +100,10 @@ The desktop app works with normal local folders. It has a PyQt graphical interfa
 
 The Android app uses Android's system folder picker. You grant it access to the folder you select; it does not need root access, broad storage permission, a separate file-manager app, or network access. Android remembers the folder permission, but undo history still lasts only for the current session.
 
+For media organization, the output root defaults to the selected source folder. A different output root can be selected before scanning; configured Movies and TV folder paths are reused when present and created when missing. Existing Movies and TV library folders can also be selected separately, which is useful when Android does not allow their shared storage root to be selected.
+
+Undo first restores every available file, then removes empty destination folders that the operation created. Existing folders are never treated as cleanup candidates. Cleanup that a provider temporarily refuses can be retried without repeating successful file restores.
+
 Android 11 and newer do not allow the system picker to grant access to a storage root, the `Download` root, `Android/data`, or `Android/obb`. Some storage providers may also refuse moves or renames. When a normal move is unavailable, the app can try copying and then deleting the original; that fallback may change the file's modified date.
 
 ## Important limits
@@ -107,3 +111,7 @@ Android 11 and newer do not allow the system picker to grant access to a storage
 - Operations work on the direct contents of the folder you choose. They do not rename every file throughout all subfolders.
 - Always review the plan first, especially when using all file types or a broad find-and-replace term.
 - The Android preview and desktop log are plans, not guarantees: a file can still fail when the change is applied because of permissions, a collision, or a storage-provider restriction.
+
+## Mobile: Protected Media Export
+
+The Export tab adds Shizuku-powered discovery of MovieBox's restricted video and subtitle folders. The selected files are normalized using the same KP media organizer as the normal SAF workflow, then safely exported into the device's shared Movies and TV Shows libraries. It includes a responsive selection/review interface, per-file transfer progress, verification, guarded source cleanup and crash-recovery restore. More information: [Protected Media Export](PROTECTED_EXPORT.md).

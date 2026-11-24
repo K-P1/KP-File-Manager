@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerUiState.kt: Models workflow inputs, one immutable pipeline progress state, retained plans, results, and undo availability; optimized for media organization. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerUiState.kt: Models organizer inputs, effective output selection, progress, retained plans, results, and undo availability. */
 package com.kp.filemanager.ui
 
 import com.kp.filemanager.domain.OperationMode
@@ -34,6 +34,10 @@ data class FileManagerUiState(
     val sourceName: String = "",
     val destinationUri: String? = null,
     val destinationName: String = "",
+    val movieLibraryUri: String? = null,
+    val movieLibraryName: String = "",
+    val tvLibraryUri: String? = null,
+    val tvLibraryName: String = "",
     val maximumScanDepth: Int = 4,
     val movieFolderName: String = "Movies",
     val tvFolderName: String = "TV Shows",
@@ -56,6 +60,15 @@ data class FileManagerUiState(
     val canUndo: Boolean = false,
     val hasManualReviewChanges: Boolean = false,
 ) {
+    val effectiveDestinationUri: String?
+        get() = destinationUri ?: sourceUri
+
+    val effectiveDestinationName: String
+        get() = destinationName.ifBlank { sourceName }
+
+    val usesSourceAsDestination: Boolean
+        get() = destinationUri == null
+
     val preview: List<PlannedFileOperation>
         get() = activePlan?.operations.orEmpty()
 

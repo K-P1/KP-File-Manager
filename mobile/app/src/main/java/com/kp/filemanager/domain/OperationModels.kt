@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines organizer contracts; last changed to distinguish cleanup failures from completed operations. */
+/** mobile/app/src/main/java/com/kp/filemanager/domain/OperationModels.kt: Defines organizer contracts for routed library destinations, execution results, and cleanup-aware undo. */
 package com.kp.filemanager.domain
 
 import java.util.Locale
@@ -336,6 +336,9 @@ data class OperationPlan(
     val performanceMetrics: PerformanceMetrics = PerformanceMetrics(),
     val movieFolderName: String = "Movies",
     val tvFolderName: String = "TV Shows",
+    val sourceTreeUri: String = "",
+    val movieLibraryTreeUri: String? = null,
+    val tvLibraryTreeUri: String? = null,
 ) {
     val hasBlockingConflicts: Boolean
         get() = operations.any(PlannedFileOperation::hasBlockingConflict)
@@ -354,6 +357,8 @@ data class OperationRequest(
     val mode: OperationMode,
     val sourceTreeUri: String,
     val destinationTreeUri: String? = null,
+    val movieLibraryTreeUri: String? = null,
+    val tvLibraryTreeUri: String? = null,
     val maximumScanDepth: Int = 4,
     val movieFolderName: String = "Movies",
     val tvFolderName: String = "TV Shows",

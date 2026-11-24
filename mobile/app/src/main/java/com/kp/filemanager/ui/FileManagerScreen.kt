@@ -1,4 +1,4 @@
-/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerScreen.kt: Hosts the adaptive app shell, navigation, storage explanation, and destination screens; rebuilt for the UI refactor. */
+/** mobile/app/src/main/java/com/kp/filemanager/ui/FileManagerScreen.kt: Hosts the adaptive app shell and routes source, output-root, and library-folder selection. */
 package com.kp.filemanager.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +14,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.FindReplace
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.FolderSpecial
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,6 +44,9 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kp.filemanager.domain.OperationMode
+import com.kp.filemanager.export.ProtectedExportViewModel
+import com.kp.filemanager.export.ProtectedExportUiState
+import com.kp.filemanager.export.ProtectedExportScreen
 import com.kp.filemanager.ui.screens.BatchRenameScreen
 import com.kp.filemanager.ui.screens.FindAndReplaceScreen
 import com.kp.filemanager.ui.screens.OrganizerScreen
@@ -53,18 +57,26 @@ import com.kp.filemanager.ui.theme.spacing
 @Composable
 fun FileManagerScreen(
     viewModel: FileManagerViewModel,
+    exportViewModel: ProtectedExportViewModel,
     onPickSource: () -> Unit,
     onPickDestination: () -> Unit,
+    onPickMovieLibrary: () -> Unit,
+    onPickTvLibrary: () -> Unit,
     themePreference: ThemePreference,
     onThemePreferenceChange: (ThemePreference) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val exportState by exportViewModel.uiState.collectAsStateWithLifecycle()
     FileManagerContent(
+        exportState = exportState,
+        exportActions = exportViewModel,
         uiState = uiState,
         actions = viewModel,
         onPickSource = onPickSource,
         onPickDestination = onPickDestination,
+        onPickMovieLibrary = onPickMovieLibrary,
+        onPickTvLibrary = onPickTvLibrary,
         themePreference = themePreference,
         onThemePreferenceChange = onThemePreferenceChange,
         modifier = modifier,
@@ -75,9 +87,13 @@ fun FileManagerScreen(
 @Composable
 private fun FileManagerContent(
     uiState: FileManagerUiState,
+    exportState: ProtectedExportUiState,
+    exportActions: ProtectedExportViewModel,
     actions: FileManagerActions,
     onPickSource: () -> Unit,
     onPickDestination: () -> Unit,
+    onPickMovieLibrary: () -> Unit,
+    onPickTvLibrary: () -> Unit,
     themePreference: ThemePreference,
     onThemePreferenceChange: (ThemePreference) -> Unit,
     modifier: Modifier = Modifier,
@@ -86,6 +102,7 @@ private fun FileManagerContent(
     var showFolderAccessExplanation by rememberSaveable { mutableStateOf(false) }
     var pendingDestinationName by rememberSaveable { mutableStateOf<String?>(null) }
     val destination = AppDestination.entries.first { it.name == destinationName }
+    val isAnyWorking = uiState.isWorking || exportState.isWorking
 
     val requestSourceFolder = {
         if (uiState.sourceUri == null) {
@@ -100,6 +117,7 @@ private fun FileManagerContent(
             destinationName = selected.name
             when (selected) {
                 AppDestination.ORGANIZE -> actions.selectMode(OperationMode.ORGANIZE_MEDIA)
+                AppDestination.PROTECTED_EXPORT -> Unit
                 AppDestination.BATCH_RENAME -> actions.selectMode(OperationMode.BATCH_RENAME)
                 AppDestination.FIND_AND_REPLACE -> actions.selectMode(OperationMode.FIND_AND_REPLACE)
                 AppDestination.SETTINGS -> Unit
@@ -107,7 +125,7 @@ private fun FileManagerContent(
         }
     }
     val selectDestination: (AppDestination) -> Unit = { selected ->
-        if (!uiState.isWorking && selected != destination) {
+        if (!isAnyWorking && selected != destination) {
             if (uiState.hasManualReviewChanges) {
                 pendingDestinationName = selected.name
             } else {
@@ -133,7 +151,7 @@ private fun FileManagerContent(
                 if (isCompact) {
                     AppBottomNavigation(
                         selected = destination,
-                        enabled = !uiState.isWorking,
+                        enabled = !isAnyWorking,
                         onSelected = selectDestination,
                     )
                 }
@@ -143,9 +161,13 @@ private fun FileManagerContent(
                 DestinationContent(
                     destination = destination,
                     uiState = uiState,
+                    exportState = exportState,
+                    exportActions = exportActions,
                     actions = actions,
                     onPickSource = requestSourceFolder,
                     onPickDestination = onPickDestination,
+                    onPickMovieLibrary = onPickMovieLibrary,
+                    onPickTvLibrary = onPickTvLibrary,
                     themePreference = themePreference,
                     onThemePreferenceChange = onThemePreferenceChange,
                     isExpanded = false,
@@ -156,23 +178,27 @@ private fun FileManagerContent(
                     if (isExpanded) {
                         ExpandedNavigation(
                             selected = destination,
-                            enabled = !uiState.isWorking,
+                            enabled = !isAnyWorking,
                             onSelected = selectDestination,
                             modifier = Modifier.fillMaxHeight().width(224.dp),
                         )
                     } else {
                         AppNavigationRail(
                             selected = destination,
-                            enabled = !uiState.isWorking,
+                            enabled = !isAnyWorking,
                             onSelected = selectDestination,
                         )
                     }
                     DestinationContent(
                         destination = destination,
                         uiState = uiState,
+                        exportState = exportState,
+                        exportActions = exportActions,
                         actions = actions,
                         onPickSource = requestSourceFolder,
                         onPickDestination = onPickDestination,
+                        onPickMovieLibrary = onPickMovieLibrary,
+                        onPickTvLibrary = onPickTvLibrary,
                         themePreference = themePreference,
                         onThemePreferenceChange = onThemePreferenceChange,
                         isExpanded = isExpanded,
@@ -237,9 +263,13 @@ private fun FileManagerContent(
 private fun DestinationContent(
     destination: AppDestination,
     uiState: FileManagerUiState,
+    exportState: ProtectedExportUiState,
+    exportActions: ProtectedExportViewModel,
     actions: FileManagerActions,
     onPickSource: () -> Unit,
     onPickDestination: () -> Unit,
+    onPickMovieLibrary: () -> Unit,
+    onPickTvLibrary: () -> Unit,
     themePreference: ThemePreference,
     onThemePreferenceChange: (ThemePreference) -> Unit,
     isExpanded: Boolean,
@@ -252,7 +282,14 @@ private fun DestinationContent(
                 actions = actions,
                 onPickSource = onPickSource,
                 onPickDestination = onPickDestination,
+                onPickMovieLibrary = onPickMovieLibrary,
+                onPickTvLibrary = onPickTvLibrary,
                 isExpanded = isExpanded,
+                modifier = Modifier.fillMaxSize(),
+            )
+            AppDestination.PROTECTED_EXPORT -> ProtectedExportScreen(
+                state = exportState,
+                actions = exportActions,
                 modifier = Modifier.fillMaxSize(),
             )
             AppDestination.BATCH_RENAME -> BatchRenameScreen(
@@ -387,6 +424,7 @@ private fun ExpandedNavigation(
 
 private fun AppDestination.icon(): ImageVector = when (this) {
     AppDestination.ORGANIZE -> Icons.Outlined.FolderOpen
+    AppDestination.PROTECTED_EXPORT -> Icons.Outlined.FolderSpecial
     AppDestination.BATCH_RENAME -> Icons.Outlined.Edit
     AppDestination.FIND_AND_REPLACE -> Icons.Outlined.FindReplace
     AppDestination.SETTINGS -> Icons.Outlined.Settings

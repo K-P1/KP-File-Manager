@@ -1,4 +1,4 @@
-/** mobile/app/src/test/java/com/kp/filemanager/domain/MediaOrganizationTest.kt: Verifies matching, naming, idempotency, and organization conflicts; created for the media refactor. */
+/** mobile/app/src/test/java/com/kp/filemanager/domain/MediaOrganizationTest.kt: Verifies matching, destination routing, naming, idempotency, and organization conflicts. */
 package com.kp.filemanager.domain
 
 import org.junit.Assert.assertEquals
@@ -40,6 +40,30 @@ class MediaOrganizationTest {
             plan.operations.map(PlannedFileOperation::destinationPath).toSet(),
         )
         assertTrue(plan.operations.all { it.status == OperationStatus.READY })
+    }
+
+    @Test
+    fun `movies and episodes can target separate existing library folders`() {
+        val files = listOf(
+            file("Avatar.2009.mkv"),
+            file("Lost.S01E01.mkv"),
+        )
+
+        val plan = planner.plan(
+            files = files,
+            destinationTreeUri = "content://test/downloads",
+            existingDestinationPaths = files.mapTo(mutableSetOf(), ScannedFile::sourcePath),
+            sourceAndDestinationAreSame = true,
+            movieLibraryTreeUri = "content://test/movies",
+            tvLibraryTreeUri = "content://test/tv",
+        )
+
+        val movie = plan.operations.single { it.originalName.startsWith("Avatar") }
+        val episode = plan.operations.single { it.originalName.startsWith("Lost") }
+        assertEquals("content://test/movies", movie.destinationTreeUri)
+        assertEquals("Avatar (2009)/Avatar (2009).mkv", movie.destinationPath)
+        assertEquals("content://test/tv", episode.destinationTreeUri)
+        assertEquals("Lost/Season 01/Lost - S01E01.mkv", episode.destinationPath)
     }
 
     @Test

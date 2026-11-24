@@ -1,4 +1,4 @@
-/** mobile/app/src/test/java/com/kp/filemanager/data/OperationExecutorTest.kt: Verifies execution, cleanup completion, failure isolation, and undo; last changed for exhaustive old-folder cleanup. */
+/** mobile/app/src/test/java/com/kp/filemanager/data/OperationExecutorTest.kt: Verifies execution, failure isolation, and two-phase undo cleanup; last changed for cleanup-only retries. */
 package com.kp.filemanager.data
 
 import com.kp.filemanager.domain.DocumentEntry
@@ -61,6 +61,47 @@ class OperationExecutorTest {
     }
 
     @Test
+    fun `undo restores every file before removing created destination folders`() {
+        val gateway = FakeMutationGateway(existingSources = mutableSetOf("source-a", "source-b"))
+        val executor = OperationExecutor(gateway)
+        executor.execute(
+            plan(
+                operation("source-a", "A.mkv"),
+                operation("source-b", "B.mkv").copy(destinationPath = "Movies/B/B.mkv"),
+            ),
+        )
+
+        executor.undoLast()
+
+        assertEquals(
+            listOf("undo:source-b", "undo:source-a"),
+            gateway.events.take(2),
+        )
+    }
+
+    @Test
+    fun `created folder cleanup can be retried without restoring a file twice`() {
+        val gateway = FakeMutationGateway(existingSources = mutableSetOf("source-a"))
+        val executor = OperationExecutor(gateway)
+        executor.execute(plan(operation("source-a", "A.mkv")))
+        gateway.failOnCleanup += "created:Movies/A"
+
+        val firstUndo = executor.undoLast()
+
+        assertEquals(1, firstUndo.completedCount)
+        assertEquals(1, firstUndo.cleanupFailures.size)
+        assertTrue(executor.canUndo())
+        gateway.failOnCleanup.clear()
+
+        val cleanupRetry = executor.undoLast()
+
+        assertEquals(0, cleanupRetry.completedCount)
+        assertTrue(cleanupRetry.cleanupFailures.isEmpty())
+        assertEquals(listOf("source-a"), gateway.undoneSources)
+        assertFalse(executor.canUndo())
+    }
+
+    @Test
     fun `failed undo entries remain available for retry`() {
         val gateway = FakeMutationGateway(existingSources = mutableSetOf("source-a", "source-b"))
         val executor = OperationExecutor(gateway)
@@ -85,6 +126,24 @@ class OperationExecutorTest {
         executor.execute(plan(operation("source-a", "A.mkv"), operation("source-b", "B.mkv")))
 
         assertEquals(listOf("Movies/A"), gateway.preparedDirectoryPaths)
+    }
+
+    @Test
+    fun `executor prepares the same relative directory separately for different output roots`() {
+        val gateway = FakeMutationGateway(existingSources = mutableSetOf("source-a", "source-b"))
+        val executor = OperationExecutor(gateway)
+
+        executor.execute(
+            plan(
+                operation("source-a", "A.mkv").copy(destinationTreeUri = "movies-root"),
+                operation("source-b", "B.mkv").copy(destinationTreeUri = "tv-root"),
+            ),
+        )
+
+        assertEquals(
+            listOf("movies-root:Movies/A", "tv-root:Movies/A"),
+            gateway.preparedDirectoryRequests,
+        )
     }
 
     @Test
@@ -148,6 +207,8 @@ class OperationExecutorTest {
         val undoneSources = mutableListOf<String>()
         val cleanedDirectories = mutableListOf<String>()
         val preparedDirectoryPaths = mutableListOf<String>()
+        val preparedDirectoryRequests = mutableListOf<String>()
+        val events = mutableListOf<String>()
 
         override fun documentExists(uri: String) = uri in existingSources
 
@@ -158,6 +219,7 @@ class OperationExecutorTest {
 
         override fun ensureDirectoryPath(treeUri: String, relativePath: String): PreparedDirectory {
             preparedDirectoryPaths += relativePath
+            preparedDirectoryRequests += "$treeUri:$relativePath"
             return PreparedDirectory("prepared:$relativePath", listOf("created:$relativePath"))
         }
 
@@ -180,6 +242,7 @@ class OperationExecutorTest {
 
         override fun undo(mutation: DocumentMutation) {
             if (mutation.beforeUri in failOnUndo) error("restore failure")
+            events += "undo:${mutation.beforeUri}"
             undoneSources += mutation.beforeUri
             existingSources += mutation.beforeUri
             destinations -= mutation.operation.destinationPath
@@ -187,6 +250,7 @@ class OperationExecutorTest {
 
         override fun deleteDirectoryIfEmpty(uri: String, parentUri: String?): Boolean {
             if (uri in failOnCleanup) throw IOException("provider failure")
+            events += "cleanup:$uri"
             cleanedDirectories += uri
             return true
         }
